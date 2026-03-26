@@ -3,7 +3,6 @@ using UnityEngine;
 
 public class EnemySpawner : MonoBehaviour
 {
-    public GameObject enemyType;
     public int enemyNum;
     public int waveNum;
 
@@ -27,7 +26,7 @@ public class EnemySpawner : MonoBehaviour
         Vector3 pos = transform.position;
         Quaternion rotation = transform.rotation;
 
-        Instantiate(enemyType, new Vector3(pos.x, 0.5f, pos.z), rotation);
+        Instantiate(PrefabManager.Instance.SwarmerPrefab, new Vector3(pos.x, 0.5f, pos.z), rotation);
 
         for (int i = 0, index = 1; index < enemyNum; ++i)
         {
@@ -43,7 +42,7 @@ public class EnemySpawner : MonoBehaviour
             for (int j = 0; index < enemyNum && j < steps; ++j)
             {
                 pos += offset * spacing;
-                Instantiate(enemyType, new Vector3(pos.x, 0.5f, pos.z), rotation);
+                Instantiate(PrefabManager.Instance.SwarmerPrefab, new Vector3(pos.x, 0.5f, pos.z), rotation);
                 ++index;
             }
         }

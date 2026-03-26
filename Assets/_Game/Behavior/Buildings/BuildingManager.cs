@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.VFX;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
@@ -404,6 +405,7 @@ public class BuildingManager : MonoBehaviour
     {
         foreach (Renderer renderer in instance.GetComponentsInChildren<Renderer>())
         {
+            if (renderer.GetComponent<VisualEffect>() != null) continue;
             renderer.material = material;
         }
     }
