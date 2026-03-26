@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.InputSystem;
 using UnityEngine.VFX;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
@@ -71,7 +72,7 @@ public class BuildingManager : MonoBehaviour
         if (isSellingMode)
         {
             HandleSellingHover();
-            if (Input.GetMouseButtonDown(0)) // Left-click to sell
+            if (Mouse.current.leftButton.wasPressedThisFrame) // Left-click to sell
             {
                 AttemptSellBuilding();
             }
@@ -101,7 +102,7 @@ public class BuildingManager : MonoBehaviour
             {
                 ShowStandardPreview(currentCoords, grid);
 
-                if (Input.GetMouseButtonDown(0))
+                if (Mouse.current.leftButton.wasPressedThisFrame)
                 {
                     dragStartCoords = currentCoords;
                     isDragging = true;
@@ -118,7 +119,7 @@ public class BuildingManager : MonoBehaviour
             HandleStandardPlacement(currentCoords, grid);
         }
 
-        if (Input.GetMouseButtonUp(0))
+        if (Mouse.current.leftButton.wasReleasedThisFrame)
         {
             isDragging = false;
             ClearWallPreview();
@@ -152,7 +153,7 @@ public class BuildingManager : MonoBehaviour
 
         UpdateWallPreview(dragCoords, grid, canAfford);
 
-        if (Input.GetMouseButtonUp(0))
+        if (Mouse.current.leftButton.wasReleasedThisFrame)
         {
             if (canAfford && CanPlaceWallLine(dragCoords, grid))
             {
@@ -196,7 +197,7 @@ public class BuildingManager : MonoBehaviour
                     && PlayerMoney.Instance.Money >= currentBuildable.Price;
         UpdatePreviewPosition(gridPos, canPlace);
 
-        if (Input.GetMouseButtonDown(0) && canPlace)
+        if (Mouse.current.leftButton.wasPressedThisFrame && canPlace)
         {
             //Debug.Log("SubtractingMoney: " + currentBuildable.Price);
             PlayerMoney.Instance.SubtractMoney(currentBuildable.Price);
@@ -425,7 +426,7 @@ public class BuildingManager : MonoBehaviour
     {
         PointerEventData eventData = new PointerEventData(eventSystem)
         {
-            position = Input.mousePosition
+            position = Mouse.current.position.ReadValue()
         };
 
         List<RaycastResult> results = new List<RaycastResult>();

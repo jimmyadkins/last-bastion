@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.InputSystem;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 using static MainMenuManager;
@@ -47,7 +48,7 @@ public class PauseManager : MonoBehaviour
     private void Update()
     {
         // Press 'P' or 'Esc' to toggle pause
-        if (Input.GetKeyDown(KeyCode.P) || Input.GetKeyDown(KeyCode.Escape))
+        if (Keyboard.current.pKey.wasPressedThisFrame || Keyboard.current.escapeKey.wasPressedThisFrame)
         {
             TogglePause();
         }

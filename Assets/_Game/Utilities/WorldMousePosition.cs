@@ -1,6 +1,5 @@
-using System.Collections;
-using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.InputSystem;
 
 public class WorldMousePosition : MonoBehaviour
 {
@@ -16,7 +15,7 @@ public class WorldMousePosition : MonoBehaviour
 
     private void Update()
     {
-        Ray ray = Camera.main.ScreenPointToRay(Input.mousePosition);
+        Ray ray = Camera.main.ScreenPointToRay(Mouse.current.position.ReadValue());
 
         Plane plane = new Plane(Vector3.up, Vector3.zero);
 
