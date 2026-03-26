@@ -6,7 +6,7 @@ public class BuildableObject : MonoBehaviour, IBuilding, IGridElement
     [SerializeField] private Vector2Int size = new Vector2Int(2, 2);
     public virtual Vector2Int Size => size;
     [SerializeField] private int health = 1000;
-    public virtual int Health { get; protected set; } = 1000;
+    public virtual int Health { get; protected set; }
     [SerializeField] private int price = 1000;
     public virtual int Price
     {
@@ -15,7 +15,7 @@ public class BuildableObject : MonoBehaviour, IBuilding, IGridElement
     }
     public bool IsDestroyed => Health <= 0;
     [SerializeField] private bool isSellable = true;
-    public virtual bool IsSellable { get; protected set; } = true;
+    public virtual bool IsSellable { get; protected set; }
     public Vector2Int Coordinates { get; private set; }
 
     private Vector2Int m_coordinates;
@@ -25,6 +25,8 @@ public class BuildableObject : MonoBehaviour, IBuilding, IGridElement
 
     protected virtual void Awake()
     {
+        Health = health;
+        IsSellable = isSellable;
         buildingManager = BuildingManager.Instance;
         gridManager = GridManager.Instance;
         buildingManager.Register(this);

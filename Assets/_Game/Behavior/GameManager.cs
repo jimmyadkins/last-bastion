@@ -67,7 +67,7 @@ public class GameManager : MonoBehaviour
             return;
         }
 
-        EnemySpawner[] invalidSpawners = FindObjectsByType<EnemySpawner>(FindObjectsSortMode.None);
+        EnemySpawner[] invalidSpawners = FindObjectsByType<EnemySpawner>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
         foreach (EnemySpawner spawner in invalidSpawners)
         {
             Destroy(spawner.gameObject);

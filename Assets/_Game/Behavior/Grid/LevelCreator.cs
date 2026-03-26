@@ -84,7 +84,7 @@ public class LevelCreator : MonoBehaviour
 
     private bool GetHQPosition(ref LevelData ld)
     {
-        HQ[] hqs = FindObjectsByType<HQ>(FindObjectsSortMode.None);
+        HQ[] hqs = FindObjectsByType<HQ>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
         if (hqs.Length != 1)
         {
             Debug.LogError("There are either too many HQs or there isn't one. Fix this");
@@ -98,7 +98,7 @@ public class LevelCreator : MonoBehaviour
     {
         List<SpawnerData> spawnerDatas = new();
 
-        EnemySpawner[] spawners = FindObjectsByType<EnemySpawner>(FindObjectsSortMode.None);
+        EnemySpawner[] spawners = FindObjectsByType<EnemySpawner>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
         foreach (EnemySpawner spawner in spawners)
         {
             spawnerDatas.Add(new SpawnerData

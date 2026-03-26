@@ -24,7 +24,6 @@ public class BuildingManager : MonoBehaviour
     private bool m_bNoPlacing = false;
 
     private IBuilding hoveredBuilding = null;
-    private Material originalMaterial = null;
 
     private Vector2Int dragStartCoords;
     private List<Vector2Int> dragCoords = new List<Vector2Int>();
