@@ -86,6 +86,7 @@ public class GameManager : MonoBehaviour
                 spawner.Rotation);
 
             m_spawners[spawner.WaveNum-1].Add(spawnerGo);
+            spawnerGo.enemyType = PrefabManager.Instance.SwarmerPrefab.gameObject;
             spawnerGo.enemyNum = spawner.EnemyCount;
             spawnerGo.waveNum = spawner.WaveNum;
         }

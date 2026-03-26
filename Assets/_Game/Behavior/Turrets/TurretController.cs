@@ -368,7 +368,7 @@ public class TurretController : MonoBehaviour
             m_target.Invalidate();
         }
 
-        TurretManager.Instance.Deregister(this);
+        TurretManager.Instance?.Deregister(this);
     }
 
     protected struct Target
