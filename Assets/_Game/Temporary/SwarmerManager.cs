@@ -1,5 +1,8 @@
 using System.Collections.Generic;
 using System.Linq;
+using Unity.Collections;
+using Unity.Jobs;
+using Unity.Mathematics;
 using UnityEngine;
 
 public class SwarmerManager : MonoBehaviour
@@ -100,6 +103,94 @@ public class SwarmerManager : MonoBehaviour
         {
             m_averageHeading[key] = m_averageHeading[key].normalized;
         }
+
+        // --- Burst separation pass ---
+        int count = m_swarmers.Count;
+        if (count > 0)
+        {
+            float radius = m_swarmers[0].Radius;
+            float neighborDistSq = NeighborDetectionDistance * NeighborDetectionDistance;
+
+            var positions   = new NativeArray<float3>(count, Allocator.TempJob);
+            var isAttacking = new NativeArray<bool>(count,   Allocator.TempJob);
+            var separations = new NativeArray<float3>(count, Allocator.TempJob);
+
+            for (int i = 0; i < count; i++)
+            {
+                Vector3 p = m_swarmers[i].transform.position;
+                positions[i]   = new float3(p.x, p.y, p.z);
+                isAttacking[i] = m_swarmers[i].IsAttacking;
+            }
+
+            new SwarmerBurstJobs.SeparationJob
+            {
+                Positions         = positions,
+                IsAttacking       = isAttacking,
+                NeighborDistanceSq = neighborDistSq,
+                Radius            = radius,
+                OutSeparation     = separations
+            }.Schedule(count, 32).Complete();
+
+            for (int i = 0; i < count; i++)
+            {
+                float3 s = separations[i];
+                m_swarmers[i].PrecomputedSeparation = new Vector3(s.x, s.y, s.z);
+            }
+
+            positions.Dispose();
+            isAttacking.Dispose();
+            separations.Dispose();
+        }
+        // --- end Burst separation pass ---
+
+        // --- Batch raycast pass ---
+        if (count > 0)
+        {
+            const int RaysPerSwarmer = 7;
+            int mainMask = (1 << Defines.EnvironmentLayer) | (1 << Defines.PlayerLayer);
+            var mainParams    = new QueryParameters(mainMask);
+            var whiskerParams = new QueryParameters(Physics.DefaultRaycastLayers);
+
+            var rayCommands = new NativeArray<RaycastCommand>(count * RaysPerSwarmer, Allocator.TempJob);
+            var rayResults  = new NativeArray<RaycastHit>(count * RaysPerSwarmer, Allocator.TempJob);
+
+            for (int i = 0; i < count; i++)
+            {
+                SwarmerController s = m_swarmers[i];
+                Vector3    pos      = s.transform.position;
+                Vector3    fwd      = s.transform.forward;
+                float      r        = s.Radius;
+                Quaternion avoidRot = Quaternion.AngleAxis(AvoidanceAngle, Vector3.up);
+
+                int b = i * RaysPerSwarmer;
+                rayCommands[b + 0] = new RaycastCommand(pos,                         fwd,                                mainParams,    ObstacleAvoidDistance);
+                rayCommands[b + 1] = new RaycastCommand(pos + s.transform.right * r, avoidRot * fwd,                     mainParams,    ObstacleAvoidDistance);
+                rayCommands[b + 2] = new RaycastCommand(pos - s.transform.right * r, Quaternion.Inverse(avoidRot) * fwd, mainParams,    ObstacleAvoidDistance);
+
+                for (int w = 0; w < 2; w++)
+                {
+                    float      angle = 45f + w * 45f;
+                    Quaternion rot   = Quaternion.AngleAxis(angle, Vector3.up);
+                    rayCommands[b + 3 + w * 2]     = new RaycastCommand(pos, Quaternion.Inverse(rot) * fwd, whiskerParams, WhiskerDistance);
+                    rayCommands[b + 3 + w * 2 + 1] = new RaycastCommand(pos, rot * fwd,                     whiskerParams, WhiskerDistance);
+                }
+            }
+
+            RaycastCommand.ScheduleBatch(rayCommands, rayResults, 32).Complete();
+
+            for (int i = 0; i < count; i++)
+            {
+                int b = i * RaysPerSwarmer;
+                m_swarmers[i].SetPrecomputedRaycasts(
+                    rayResults[b + 0], rayResults[b + 1], rayResults[b + 2],
+                    rayResults[b + 3], rayResults[b + 5],   // left whiskers 0, 1
+                    rayResults[b + 4], rayResults[b + 6]);  // right whiskers 0, 1
+            }
+
+            rayCommands.Dispose();
+            rayResults.Dispose();
+        }
+        // --- end batch raycast pass ---
 
         List<SwarmerController> swarmersToRemove = new();
 

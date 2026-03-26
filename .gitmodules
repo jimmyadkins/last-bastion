@@ -1,0 +1,3 @@
+[submodule "Packages/com.latios.latiosframework"]
+	path = Packages/com.latios.latiosframework
+	url = https://github.com/Dreaming381/Latios-Framework

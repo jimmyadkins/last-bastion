@@ -28,6 +28,34 @@ public class SwarmerController : MonoBehaviour
 
     private SwarmerManager m_manager;
     private float m_radius;
+    public float Radius => m_radius;
+
+    // Written by SwarmerManager each FixedUpdate via Burst SeparationJob
+    public Vector3 PrecomputedSeparation;
+
+    // Written by SwarmerManager each FixedUpdate via RaycastCommand batch
+    private RaycastHit m_preForwardHit;
+    private RaycastHit m_preRightHit;
+    private RaycastHit m_preLeftHit;
+    private RaycastHit m_preLeftWhisker0;
+    private RaycastHit m_preLeftWhisker1;
+    private RaycastHit m_preRightWhisker0;
+    private RaycastHit m_preRightWhisker1;
+
+    public void SetPrecomputedRaycasts(
+        RaycastHit fwd, RaycastHit right, RaycastHit left,
+        RaycastHit leftW0, RaycastHit leftW1,
+        RaycastHit rightW0, RaycastHit rightW1)
+    {
+        m_preForwardHit    = fwd;
+        m_preRightHit      = right;
+        m_preLeftHit       = left;
+        m_preLeftWhisker0  = leftW0;
+        m_preLeftWhisker1  = leftW1;
+        m_preRightWhisker0 = rightW0;
+        m_preRightWhisker1 = rightW1;
+    }
+
     private IBuilding m_target;
     private int m_attention;
 
@@ -151,20 +179,12 @@ public class SwarmerController : MonoBehaviour
 
         AvoidanceDistances d = new();
 
-        forwardHit = Physics.Raycast(forwardRay,
-                                     out RaycastHit forwardHitInfo,
-                                     m_manager.ObstacleAvoidDistance,
-                                     m_environmentLayer | m_targetsLayer);
-
-        rightHit   = Physics.Raycast(rightRay,
-                                     out RaycastHit rightHitInfo,
-                                     m_manager.ObstacleAvoidDistance,
-                                     m_environmentLayer | m_targetsLayer);
-
-        leftHit    = Physics.Raycast(leftRay,
-                                     out RaycastHit leftHitInfo,
-                                     m_manager.ObstacleAvoidDistance,
-                                     m_environmentLayer | m_targetsLayer);
+        RaycastHit forwardHitInfo = m_preForwardHit;
+        RaycastHit rightHitInfo   = m_preRightHit;
+        RaycastHit leftHitInfo    = m_preLeftHit;
+        forwardHit = forwardHitInfo.collider != null;
+        rightHit   = rightHitInfo.collider   != null;
+        leftHit    = leftHitInfo.collider    != null;
 
         HandleTargetSelection(ref d, in forwardHitInfo, in rightHitInfo, in leftHitInfo);
 
@@ -178,15 +198,12 @@ public class SwarmerController : MonoBehaviour
             leftRays[i] = new Ray(transform.position, Quaternion.Inverse(rotation) * transform.forward);
 
 
-            leftHits[i]  = Physics.Raycast(leftRays[i],
-                                           out RaycastHit lInfo,
-                                           m_manager.WhiskerDistance);
-            rightHits[i] = Physics.Raycast(rightRays[i],
-                                           out RaycastHit rInfo,
-                                           m_manager.WhiskerDistance);
+            RaycastHit lInfo = i == 0 ? m_preLeftWhisker0  : m_preLeftWhisker1;
+            RaycastHit rInfo = i == 0 ? m_preRightWhisker0 : m_preRightWhisker1;
+            leftHits[i]  = lInfo.collider != null;
+            rightHits[i] = rInfo.collider != null;
 
-
-            d.LeftDistances += lInfo.distance;
+            d.LeftDistances  += lInfo.distance;
             d.RightDistances += rInfo.distance;
         }
 
@@ -219,44 +236,8 @@ public class SwarmerController : MonoBehaviour
             avoidanceRotation = GetAvoidance(favoredRotation, ref d);
         }
 
-        // GETTING NEIGHBOR HEADINGS USING SPHERE CAST
-        //Collider[] colliders = Physics.OverlapSphere(transform.position, m_manager.SwarmerViewRange, m_swarmerLayer);
-        //Vector3 neighborHeading = Vector3.zero;
-        //foreach (Collider collider in colliders)
-        //{
-        //    neighborHeading += collider.transform.forward;
-        //}
-
-        // Perform a sphere check to find all colliders within the radius
-        Collider[] colliders = Physics.OverlapSphere(transform.position, m_manager.NeighborDetectionDistance, m_swarmerLayer);
-
-        Vector3 seperationAccumulation = Vector3.zero;
-        foreach (var collider in colliders)
-        {
-            // Don't try and avoid it if it's attacking
-            if (collider.transform.position == transform.position || collider.GetComponent<SwarmerController>().IsAttacking)
-            {
-                continue;
-            }
-            Vector3 avoidHeading = -(collider.transform.position - transform.position);
-            //Debug.Log($"{avoidHeading}");
-
-            float dist = avoidHeading.magnitude;
-            float sqrtDenominator = Mathf.Max(Mathf.Abs(dist - 2*m_radius), .03f) * 4;
-            float scale = 1 / (sqrtDenominator * sqrtDenominator);
-            if (ShowDesiredHeading)
-            {
-                Debug.Log($"Scale: {scale} -- sqrMag: {(Vector3.SqrMagnitude(avoidHeading))} radius constant: {(m_radius * 1.99f * m_radius * 1.99f)}");
-            }
-            avoidHeading *= scale;
-            if (ShowDesiredHeading)
-            {
-                Debug.DrawLine(transform.position, transform.position + avoidHeading, Color.white);
-            }
-            //Debug.Log($"{avoidHeading}");
-            seperationAccumulation += avoidHeading;
-        }
-        Vector2 separation = seperationAccumulation.xz();
+        // Separation vector is now precomputed by SwarmerManager via Burst SeparationJob
+        Vector2 separation = PrecomputedSeparation.xz();
         //Debug.Log(separation);
 
         Vector2 alignment = m_manager.GetCellHeading(transform.position);
@@ -439,7 +420,7 @@ public class SwarmerController : MonoBehaviour
                 m_bAttacking = m_bFacingTarget;
                 if (m_bAttacking)
                 {
-                    if (!(attackVFX.aliveParticleCount > 0)) // VisualEffect-specific check
+                    if (attackVFX != null && !(attackVFX.aliveParticleCount > 0)) // VisualEffect-specific check
                     {
                         attackVFX.Play(); // Start the VFX if it's not already playing
                     }
@@ -461,7 +442,7 @@ public class SwarmerController : MonoBehaviour
             }
             else
             {
-                if (attackVFX.aliveParticleCount > 0)
+                if (attackVFX != null && attackVFX.aliveParticleCount > 0)
                 {
                     attackVFX.Stop(); // Stop the VFX when not attacking
                 }

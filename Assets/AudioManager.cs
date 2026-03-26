@@ -42,13 +42,6 @@ public class AudioManager : MonoBehaviour
 
 
 
-    protected void Start()
-    {
-        Switchboard_OnMasterVolumeChanged(1);
-        Switchboard_OnMusicVolumeChanged(1);
-        Switchboard_OnEffectVolumeChanged(1);
-    }
-
     protected void OnDestroy()
     {
         SceneManager.sceneLoaded -= SceneManager_sceneLoaded;
@@ -57,6 +50,8 @@ public class AudioManager : MonoBehaviour
         Switchboard.OnMusicVolumeChanged -= Switchboard_OnMusicVolumeChanged;
         Switchboard.OnEffectVolumeChanged -= Switchboard_OnEffectVolumeChanged;
 
+        Switchboard.OnWaveStart -= Switchboard_OnWaveStart;
+        Switchboard.OnWaveEnd   -= Switchboard_OnWaveEnd;
         Switchboard.OnHQHealthChanged -= Switchboard_OnHQHealthChanged;
     }
 
@@ -87,7 +82,6 @@ public class AudioManager : MonoBehaviour
 
     private void Switchboard_OnMusicVolumeChanged(float volume)
     {
-        Debug.Log(volume == 0 ? -100 : Mathf.Log10(volume * Defines.MusicBaseVolume) * 20);
         Mixer.SetFloat(MUSIC_MIXERID, volume == 0 ? -100 : Mathf.Log10(volume * Defines.MusicBaseVolume) * 20);
     }
 
