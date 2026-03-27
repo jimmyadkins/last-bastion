@@ -162,23 +162,18 @@ public class SwarmerController : MonoBehaviour
 
     private void Die()
     {
-        // Perform any destruction logic, like playing an animation or sound
-        //Debug.Log($"{gameObject.name} has been destroyed.");
-        if (DeathVfxPrefab != null)
+        if (SwarmerDeathVFXPool.Instance != null)
         {
-            GameObject vfxInstance = Instantiate(DeathVfxPrefab, transform.position, Quaternion.identity);
-
-            ParticleSystem particleSystem = vfxInstance.GetComponent<ParticleSystem>();
-            if (particleSystem != null)
-            {
-                Destroy(vfxInstance, particleSystem.main.duration);
-            }
-            else
-            {
-                Destroy(vfxInstance, 8.0f);
-            }
+            SwarmerDeathVFXPool.Instance.Play(transform.position);
         }
-        Destroy(gameObject); // Destroy the swarmer
+        else if (DeathVfxPrefab != null)
+        {
+            // Fallback: direct instantiate if pool isn't in the scene.
+            GameObject vfxInstance = Instantiate(DeathVfxPrefab, transform.position, Quaternion.identity);
+            ParticleSystem ps = vfxInstance.GetComponent<ParticleSystem>();
+            Destroy(vfxInstance, ps != null ? ps.main.duration : 8f);
+        }
+        Destroy(gameObject);
     }
 
     // DEBUG 
