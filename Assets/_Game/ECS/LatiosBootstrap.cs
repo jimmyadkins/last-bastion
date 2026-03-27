@@ -14,6 +14,15 @@ public class LatiosBootstrap : ICustomBootstrap
     {
         var world = new LatiosWorld(defaultWorldName);
         World.DefaultGameObjectInjectionWorld = world;
+
+        // Discover and register all systems (including FixedStepSimulationSystemGroup
+        // and SwarmerSuperSystem) into the world's root-level system groups.
+        var systems = DefaultWorldInitialization.GetAllSystems(WorldSystemFilterFlags.Default);
+        DefaultWorldInitialization.AddSystemsToRootLevelSystemGroups(world, systems);
+
+        // Hook the world into Unity's player loop so Update/FixedUpdate/etc. fire.
+        ScriptBehaviourUpdateOrder.AppendWorldToCurrentPlayerLoop(world);
+
         world.initializationSystemGroup.SortSystems();
         return true;
     }

@@ -1,9 +1,19 @@
+using Unity.Entities;
+using Unity.Mathematics;
 using UnityEngine;
 using UnityEngine.VFX;
 
 [RequireComponent(typeof(Rigidbody))]
 public class SwarmerController : MonoBehaviour
 {
+    // ── ECS companion entity ──────────────────────────────────────────────
+    private Entity m_entity;
+    private EntityManager m_em;
+    private bool m_entityCreated;
+
+    /// <summary>Exposes the Rigidbody to the ECS move-apply system.</summary>
+    public Rigidbody GetRigidbody() => m_rb;
+
     [SerializeField] private float maxHealth = 5f;
 
     [SerializeField]
@@ -30,7 +40,7 @@ public class SwarmerController : MonoBehaviour
     private float m_radius;
     public float Radius => m_radius;
 
-    // Written by SwarmerManager each FixedUpdate via Burst SeparationJob
+    // Written each SyncToECS() by reading SwarmerSeparation from the companion ECS entity (Psyshock result)
     public Vector3 PrecomputedSeparation;
 
     // Written by SwarmerManager each FixedUpdate via RaycastCommand batch
@@ -91,6 +101,31 @@ public class SwarmerController : MonoBehaviour
         }
 
         m_attackAudioSource = GetComponent<AudioSource>();
+
+        // ── Create companion ECS entity ──────────────────────────────────
+        var world = World.DefaultGameObjectInjectionWorld;
+        if (world != null && world.IsCreated)
+        {
+            m_em     = world.EntityManager;
+            m_entity = m_em.CreateEntity();
+            m_em.SetName(m_entity, gameObject.name);
+
+            Vector3 initPos = transform.position;
+            Vector3 initFwd = transform.forward;
+            m_em.AddComponentData(m_entity, new SwarmerPosition   { Value   = new float3(initPos.x, initPos.y, initPos.z) });
+            m_em.AddComponentData(m_entity, new SwarmerVelocity   { Value   = float3.zero });
+            m_em.AddComponentData(m_entity, new SwarmerHeading    { Forward = new float3(initFwd.x, initFwd.y, initFwd.z) });
+            m_em.AddComponentData(m_entity, new SwarmerRadius     { Value   = m_radius });
+            m_em.AddComponentData(m_entity, new EnemyGridCell     ());
+            m_em.AddComponentData(m_entity, new SwarmerAvoidanceInput ());
+            m_em.AddComponentData(m_entity, new SwarmerSeparation ());
+            m_em.AddComponentData(m_entity, new SwarmerTargetPos  ());
+            m_em.AddComponentData(m_entity, new SwarmerDesiredVelocity ());
+            m_em.AddComponentData(m_entity, new SwarmerIsAttacking ());
+            m_em.AddComponentObject(m_entity, new SwarmerCompanionRef { MB = this });
+
+            m_entityCreated = true;
+        }
     }
 
     protected void Update()
@@ -261,7 +296,6 @@ public class SwarmerController : MonoBehaviour
             Debug.DrawLine(transform.position, transform.position + MathFunctions.UnflattenVector2(separation), Color.green);
         }
         var targetRotation = Quaternion.LookRotation(MathFunctions.UnflattenVector2(desiredHeading), Vector3.up);
-        //transform.rotation = targetRotation;
         transform.rotation = Quaternion.RotateTowards(transform.rotation, targetRotation, m_manager.TurnSpeed * Time.fixedDeltaTime);
         Move(d);
 
@@ -430,13 +464,7 @@ public class SwarmerController : MonoBehaviour
                     }
                     m_bAttackingLastFrame = true;
                 }
-                // TRIAL 1
-                // 100 * (x^2 - d)^3 -> get desired velocity around the distance one wants to attack at
-                // graph in desmos to see
-                //float value = dist - m_manager.AttackDistance;
-                //value = Mathf.Clamp(.5f * value * value * value, -1f, 1f);
                 float value = Mathf.Clamp(0.5f * (dist - m_manager.AttackDistance), -1, 1);
-                //Debug.Log($"Current dist to target: {dist}. The current magnitude of acceleration: {value}");
                 desiredV = value * m_manager.MaxSpeed * (toTarget / dist);
 
             }
@@ -454,7 +482,6 @@ public class SwarmerController : MonoBehaviour
 
         Vector2 dv = Vector2.ClampMagnitude(desiredV-currentV, m_manager.Acceleration);
         m_rb.AddForce(MathFunctions.UnflattenVector2(dv), ForceMode.Impulse);
-        //Debug.Log($"Current Velocity: {m_rb.velocity.magnitude}");
 
         if (DeservesSlowdown(d.CenterDistance) ||
             DeservesSlowdown(d.RightDistance) ||
@@ -472,6 +499,60 @@ public class SwarmerController : MonoBehaviour
     protected void OnDestroy()
     {
         m_manager.Deregister(this);
+
+        // Destroy companion entity if it still exists
+        if (m_entityCreated)
+        {
+            var world = World.DefaultGameObjectInjectionWorld;
+            if (world != null && world.IsCreated && m_em.Exists(m_entity))
+            {
+                m_em.DestroyEntity(m_entity);
+            }
+            m_entityCreated = false;
+        }
+    }
+
+    /// <summary>
+    /// Called by SwarmerManager each FixedUpdate before UpdateSwarmer().
+    /// Writes the latest MB state into the companion ECS components so the
+    /// Burst steering systems see fresh data.
+    /// </summary>
+    public void SyncToECS()
+    {
+        if (!m_entityCreated) return;
+
+        var world = World.DefaultGameObjectInjectionWorld;
+        if (world == null || !world.IsCreated || !m_em.Exists(m_entity)) return;
+
+        Vector3 pos3 = transform.position;
+        Vector3 fwd3 = transform.forward;
+        m_em.SetComponentData(m_entity, new SwarmerPosition { Value   = new float3(pos3.x, pos3.y, pos3.z) });
+        m_em.SetComponentData(m_entity, new SwarmerHeading  { Forward = new float3(fwd3.x, fwd3.y, fwd3.z) });
+        Vector3 vel = m_rb.linearVelocity;
+        m_em.SetComponentData(m_entity, new SwarmerVelocity { Value = new float3(vel.x, vel.y, vel.z) });
+        // SwarmerSeparation is written by SwarmerSeparationSystem (Psyshock FindPairs) — not synced from MB.
+
+        SwarmerTarget st = SwarmerTarget.Instance;
+        Vector3 rawTargetPos =
+            m_target != null ? m_target.GetPosition() :
+            st != null       ? st.transform.position :
+            transform.position;
+        float3 targetPos = new float3(rawTargetPos.x, rawTargetPos.y, rawTargetPos.z);
+
+        m_em.SetComponentData(m_entity, new SwarmerTargetPos
+        {
+            Value        = targetPos,
+            HasTarget    = m_target != null,
+            IsFacingTarget = m_bFacingTarget,
+            IsHQTarget   = m_target is HQ,
+        });
+
+        m_em.SetComponentData(m_entity, new SwarmerIsAttacking { Value = m_bAttacking });
+
+        // Read Psyshock separation back from ECS → MB uses it in UpdateSwarmer steering
+        var ecsSep = m_em.GetComponentData<SwarmerSeparation>(m_entity);
+        PrecomputedSeparation = new Vector3(ecsSep.Value.x, ecsSep.Value.y, ecsSep.Value.z);
+
     }
 
     private bool m_bMarked = false;

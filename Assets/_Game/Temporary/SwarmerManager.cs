@@ -1,6 +1,8 @@
 using System.Collections.Generic;
 using System.Linq;
+using Latios;
 using Unity.Collections;
+using Unity.Entities;
 using Unity.Jobs;
 using Unity.Mathematics;
 using UnityEngine;
@@ -53,6 +55,35 @@ public class SwarmerManager : MonoBehaviour
     public void Start()
     {
         //SpawnSwarmers(Vector2.zero, 100);
+        PushConfigToBlackboard();
+    }
+
+    /// <summary>
+    /// Writes inspector-configured movement parameters to the ECS world
+    /// blackboard entity so Burst systems can read them without managed calls.
+    /// </summary>
+    private void PushConfigToBlackboard()
+    {
+        var world = World.DefaultGameObjectInjectionWorld;
+        if (world == null || !world.IsCreated) return;
+
+        var latiosWorld = world.Unmanaged.GetLatiosWorldUnmanaged();
+        if (!latiosWorld.isValid) return;
+
+        latiosWorld.worldBlackboardEntity.AddComponentData(new SwarmerConfig
+        {
+            MaxSpeed                 = MaxSpeed,
+            Acceleration             = Acceleration,
+            TurnSpeed                = TurnSpeed,
+            TargetWeight             = TargetWeight,
+            AlignmentWeight          = AlignmentWeight,
+            SeparationWeight         = SeparationWeight,
+            ObstacleWeight           = ObstacleWeight,
+            NeighborDetectionDistance = NeighborDetectionDistance,
+            AttackDistance           = AttackDistance,
+            CellSize                 = CellSize,
+            TargetDestroyDistance    = targetDestroyDistance,
+        });
     }
 
     public void Update()
@@ -104,46 +135,10 @@ public class SwarmerManager : MonoBehaviour
             m_averageHeading[key] = m_averageHeading[key].normalized;
         }
 
-        // --- Burst separation pass ---
-        int count = m_swarmers.Count;
-        if (count > 0)
-        {
-            float radius = m_swarmers[0].Radius;
-            float neighborDistSq = NeighborDetectionDistance * NeighborDetectionDistance;
-
-            var positions   = new NativeArray<float3>(count, Allocator.TempJob);
-            var isAttacking = new NativeArray<bool>(count,   Allocator.TempJob);
-            var separations = new NativeArray<float3>(count, Allocator.TempJob);
-
-            for (int i = 0; i < count; i++)
-            {
-                Vector3 p = m_swarmers[i].transform.position;
-                positions[i]   = new float3(p.x, p.y, p.z);
-                isAttacking[i] = m_swarmers[i].IsAttacking;
-            }
-
-            new SwarmerBurstJobs.SeparationJob
-            {
-                Positions         = positions,
-                IsAttacking       = isAttacking,
-                NeighborDistanceSq = neighborDistSq,
-                Radius            = radius,
-                OutSeparation     = separations
-            }.Schedule(count, 32).Complete();
-
-            for (int i = 0; i < count; i++)
-            {
-                float3 s = separations[i];
-                m_swarmers[i].PrecomputedSeparation = new Vector3(s.x, s.y, s.z);
-            }
-
-            positions.Dispose();
-            isAttacking.Dispose();
-            separations.Dispose();
-        }
-        // --- end Burst separation pass ---
+        // Separation is now computed by SwarmerSeparationSystem (Psyshock FindPairs broadphase).
 
         // --- Batch raycast pass ---
+        int count = m_swarmers.Count;
         if (count > 0)
         {
             const int RaysPerSwarmer = 7;
@@ -192,6 +187,12 @@ public class SwarmerManager : MonoBehaviour
         }
         // --- end batch raycast pass ---
 
+        // Sync MonoBehaviour state → ECS components before ECS systems run
+        foreach (var swarmer in m_swarmers)
+        {
+            swarmer.SyncToECS();
+        }
+
         List<SwarmerController> swarmersToRemove = new();
 
         foreach (var swarmer in m_swarmers)
@@ -225,21 +226,39 @@ public class SwarmerManager : MonoBehaviour
 
     public Vector2 GetCellHeading(Vector2Int coord)
     {
-        return m_averageHeading[coord];
+        // Prefer ECS bridge data if available
+        if (SwarmerBridgeManager.Instance != null)
+            return SwarmerBridgeManager.Instance.GetCellHeading(coord);
+
+        if (m_averageHeading.TryGetValue(coord, out Vector2 h))
+            return h;
+        return Vector2.zero;
     }
 
     public Vector2 GetCellHeading(Vector3 pos)
     {
-        return m_averageHeading[GetCoord(pos)];
+        if (SwarmerBridgeManager.Instance != null)
+            return SwarmerBridgeManager.Instance.GetCellHeading(pos);
+
+        Vector2Int coord = GetCoord(pos);
+        if (m_averageHeading.TryGetValue(coord, out Vector2 h))
+            return h;
+        return Vector2.zero;
     }
 
     public Vector2Int GetCoord(Vector3 pos)
     {
+        if (SwarmerBridgeManager.Instance != null)
+            return SwarmerBridgeManager.Instance.GetCoord(pos);
+
         return new(Mathf.FloorToInt(pos.x / CellSize), Mathf.FloorToInt(pos.z / CellSize));
     }
 
     public Vector3 GetCellPosition(Vector2Int coord)
     {
+        if (SwarmerBridgeManager.Instance != null)
+            return SwarmerBridgeManager.Instance.GetCellPosition(coord);
+
         float halfCellSize = CellSize * 0.5f;
         return new Vector3((coord.x * CellSize) + halfCellSize, 0, (coord.y * CellSize) + halfCellSize);
     }
