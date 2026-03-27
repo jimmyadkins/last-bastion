@@ -68,9 +68,11 @@ public class SwarmerController : MonoBehaviour
     private IBuilding m_target;
     private int m_attention;
 
-    private bool m_bAttacking = false;
-    private bool m_bAttackingLastFrame = false;
-    private bool m_bFacingTarget = false;
+    private bool  m_bAttacking = false;
+    private bool  m_bAttackingLastFrame = false;
+    private bool  m_bFacingTarget = false;
+    private float m_attackingTimer = 0f;
+    private const float kGiveUpAttackingAfter = 4f;
 
     public bool IsAttacking => m_bAttacking;
     public IBuilding Target => m_target;
@@ -283,20 +285,34 @@ public class SwarmerController : MonoBehaviour
                 m_bAttacking = m_bFacingTarget;
                 if (m_bAttacking)
                 {
+                    m_attackingTimer += Time.fixedDeltaTime;
                     if (attackVFX != null && !(attackVFX.aliveParticleCount > 0))
                         attackVFX.Play();
                     if (!m_bAttackingLastFrame)
                         m_attackAudioSource.Play();
                     m_bAttackingLastFrame = true;
+
+                    // Give up if the target won't die — it's probably blocked or invincible.
+                    if (m_attackingTimer >= kGiveUpAttackingAfter)
+                    {
+                        m_target      = null;
+                        m_bAttacking  = false;
+                        m_attackingTimer = 0f;
+                    }
                 }
             }
             else
             {
+                m_attackingTimer = 0f;
                 if (attackVFX != null && attackVFX.aliveParticleCount > 0)
                     attackVFX.Stop();
                 m_attackAudioSource.Stop();
                 m_bAttackingLastFrame = false;
             }
+        }
+        else
+        {
+            m_attackingTimer = 0f;
         }
         // Rotation and movement are now handled by SwarmerTransformSyncSystem (ECS).
 
@@ -375,6 +391,8 @@ public class SwarmerController : MonoBehaviour
         Component component = hit.transform.parent.GetComponent(typeof(IBuilding));
         if (component is IBuilding building)
         {
+            if (m_target != building)
+                m_attackingTimer = 0f;
             m_target = building;
         }
         else

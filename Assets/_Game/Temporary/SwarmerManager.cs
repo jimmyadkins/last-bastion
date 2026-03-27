@@ -1,10 +1,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using Latios;
-using Unity.Collections;
 using Unity.Entities;
-using Unity.Jobs;
-using Unity.Mathematics;
 using UnityEngine;
 
 public class SwarmerManager : MonoBehaviour
@@ -85,6 +82,8 @@ public class SwarmerManager : MonoBehaviour
             AttackDistance           = AttackDistance,
             CellSize                 = CellSize,
             TargetDestroyDistance    = targetDestroyDistance,
+            AttackDamage             = AttackDamage,
+            CollisionDamage          = CollisionDamage,
         });
     }
 
@@ -118,113 +117,11 @@ public class SwarmerManager : MonoBehaviour
         AssignSwarmerToGrid(swarmer);
     }
 
-    protected void FixedUpdate()
-    {
-        m_averageHeading.Clear();
-        foreach (var swarmer in m_swarmers)
-        {
-            Vector2Int coord = GetCoord(swarmer.transform.position);
-            if (!m_averageHeading.ContainsKey(coord))
-            {
-                m_averageHeading.Add(coord, new());
-            }
-            m_averageHeading[coord] += swarmer.transform.forward.xz();
-        }
-
-        var keys = m_averageHeading.Keys.ToList();
-        foreach (var key in keys)
-        {
-            m_averageHeading[key] = m_averageHeading[key].normalized;
-        }
-
-        // Separation is now computed by SwarmerSeparationSystem (Psyshock FindPairs broadphase).
-
-        // --- Batch raycast pass ---
-        int count = m_swarmers.Count;
-        if (count > 0)
-        {
-            const int RaysPerSwarmer = 7;
-            int mainMask = (1 << Defines.EnvironmentLayer) | (1 << Defines.PlayerLayer);
-            var mainParams    = new QueryParameters(mainMask);
-            var whiskerParams = new QueryParameters(Physics.DefaultRaycastLayers);
-
-            var rayCommands = new NativeArray<RaycastCommand>(count * RaysPerSwarmer, Allocator.TempJob);
-            var rayResults  = new NativeArray<RaycastHit>(count * RaysPerSwarmer, Allocator.TempJob);
-
-            for (int i = 0; i < count; i++)
-            {
-                SwarmerController s = m_swarmers[i];
-                Vector3    pos      = s.transform.position;
-                Vector3    fwd      = s.transform.forward;
-                float      r        = s.Radius;
-                Quaternion avoidRot = Quaternion.AngleAxis(AvoidanceAngle, Vector3.up);
-
-                int b = i * RaysPerSwarmer;
-                rayCommands[b + 0] = new RaycastCommand(pos,                         fwd,                                mainParams,    ObstacleAvoidDistance);
-                rayCommands[b + 1] = new RaycastCommand(pos + s.transform.right * r, avoidRot * fwd,                     mainParams,    ObstacleAvoidDistance);
-                rayCommands[b + 2] = new RaycastCommand(pos - s.transform.right * r, Quaternion.Inverse(avoidRot) * fwd, mainParams,    ObstacleAvoidDistance);
-
-                for (int w = 0; w < 2; w++)
-                {
-                    float      angle = 45f + w * 45f;
-                    Quaternion rot   = Quaternion.AngleAxis(angle, Vector3.up);
-                    rayCommands[b + 3 + w * 2]     = new RaycastCommand(pos, Quaternion.Inverse(rot) * fwd, whiskerParams, WhiskerDistance);
-                    rayCommands[b + 3 + w * 2 + 1] = new RaycastCommand(pos, rot * fwd,                     whiskerParams, WhiskerDistance);
-                }
-            }
-
-            RaycastCommand.ScheduleBatch(rayCommands, rayResults, 32).Complete();
-
-            for (int i = 0; i < count; i++)
-            {
-                int b = i * RaysPerSwarmer;
-                m_swarmers[i].SetPrecomputedRaycasts(
-                    rayResults[b + 0], rayResults[b + 1], rayResults[b + 2],
-                    rayResults[b + 3], rayResults[b + 5],   // left whiskers 0, 1
-                    rayResults[b + 4], rayResults[b + 6]);  // right whiskers 0, 1
-            }
-
-            rayCommands.Dispose();
-            rayResults.Dispose();
-        }
-        // --- end batch raycast pass ---
-
-        // Sync MonoBehaviour state → ECS components before ECS systems run
-        foreach (var swarmer in m_swarmers)
-        {
-            swarmer.SyncToECS();
-        }
-
-        List<SwarmerController> swarmersToRemove = new();
-
-        foreach (var swarmer in m_swarmers)
-        {
-            swarmer.UpdateSwarmer();
-            UpdateSwarmerGridPosition(swarmer);
-
-            if (swarmer.IsAttacking)
-            {
-                swarmer.Target.TakeDamage(AttackDamage);
-            }
-
-            if (SwarmerTarget.Instance != null &&
-                Vector3.SqrMagnitude(SwarmerTarget.Instance.transform.position - swarmer.transform.position)
-                < targetDestroyDistance * targetDestroyDistance)
-            {
-                if (SwarmerTarget.Instance.GetComponentInParent<HQ>() is HQ hq)
-                {
-                    hq.TakeCollisionDamage(CollisionDamage);
-                }
-                swarmersToRemove.Add(swarmer);
-            }
-        }
-        foreach (var swarmer in swarmersToRemove)
-        {
-            Destroy(swarmer.gameObject);
-        }
-
-        BuildingManager.Instance.CleanupBuildings();
-    }
+    // Phase 5: FixedUpdate logic moved to ECS systems in SwarmerSuperSystem:
+    //   raycast batch + SyncToECS + UpdateSwarmer → SwarmerRaycastAndUpdateSystem
+    //   attack damage                             → SwarmerAttackSystem
+    //   HQ collision damage + destroy             → SwarmerHQDamageSystem
+    //   BuildingManager.CleanupBuildings()        → BuildingManager.Update()
 
     public Vector2 GetCellHeading(Vector2Int coord)
     {

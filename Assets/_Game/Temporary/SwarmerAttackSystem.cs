@@ -19,11 +19,12 @@ public partial class SwarmerAttackSystem : SystemBase
         m_query = GetEntityQuery(
             ComponentType.ReadOnly<SwarmerIsAttacking>(),
             ComponentType.ReadOnly<SwarmerCompanionRef>());
+        RequireForUpdate<SwarmerConfig>();
     }
 
     protected override void OnUpdate()
     {
-        int attackDamage = SwarmerManager.Instance != null ? SwarmerManager.Instance.AttackDamage : 1;
+        int attackDamage = SystemAPI.GetSingleton<SwarmerConfig>().AttackDamage;
 
         var entities   = m_query.ToEntityArray(Allocator.Temp);
         var attacking  = m_query.ToComponentDataArray<SwarmerIsAttacking>(Allocator.Temp);

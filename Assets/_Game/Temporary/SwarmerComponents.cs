@@ -66,6 +66,8 @@ public struct SwarmerConfig : IComponentData
     public float CellSize;
     public float TargetDestroyDistance;
     public float LinearDamping;
+    public int   AttackDamage;
+    public int   CollisionDamage;
 }
 
 // ─── Grid data stored on worldBlackboardEntity (ICollectionComponent) ────────

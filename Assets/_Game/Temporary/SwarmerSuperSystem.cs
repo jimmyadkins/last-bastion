@@ -10,14 +10,17 @@ public partial class SwarmerSuperSystem : RootSuperSystem
 {
     protected override void CreateSystems()
     {
+        // Phase 5: raycast batch + SyncToECS + UpdateSwarmer — runs first so
+        // avoidance/target data is fresh before steering reads it.
+        GetOrCreateAndAddManagedSystem<SwarmerRaycastAndUpdateSystem>();
         GetOrCreateAndAddUnmanagedSystem<SwarmerGridUpdateSystem>();
         GetOrCreateAndAddUnmanagedSystem<SwarmerSeparationSystem>();
         GetOrCreateAndAddUnmanagedSystem<SwarmerSteeringSystem>();
-        // Phase 4: ECS owns kinematic integration — no Rigidbody.
         GetOrCreateAndAddUnmanagedSystem<SwarmerMoveApplySystem>();
-        // Phase 4: write ECS position/velocity/heading → companion Transform each tick.
         GetOrCreateAndAddManagedSystem<SwarmerTransformSyncSystem>();
         GetOrCreateAndAddManagedSystem<SwarmerAttackSystem>();
+        // Phase 5: HQ collision — after positions synced, before entity death cleanup.
+        GetOrCreateAndAddManagedSystem<SwarmerHQDamageSystem>();
         GetOrCreateAndAddManagedSystem<SwarmerDeathSystem>();
     }
 }

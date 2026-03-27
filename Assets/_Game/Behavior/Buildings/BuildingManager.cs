@@ -34,9 +34,13 @@ public class BuildingManager : MonoBehaviour
 
     public static BuildingManager Instance { get; private set; }
 
+    private PointerEventData m_pointerEventData;
+    private readonly List<RaycastResult> m_raycastResults = new();
+
     protected void Awake()
     {
         Instance = this;
+        m_pointerEventData = new PointerEventData(eventSystem);
     }
 
     private void OnEnable()
@@ -63,6 +67,8 @@ public class BuildingManager : MonoBehaviour
 
     protected void Update()
     {
+        CleanupBuildings();
+
         if (m_bNoPlacing)
         {
             return;
@@ -406,7 +412,7 @@ public class BuildingManager : MonoBehaviour
         foreach (Renderer renderer in instance.GetComponentsInChildren<Renderer>())
         {
             if (renderer.GetComponent<VisualEffect>() != null) continue;
-            renderer.material = material;
+            renderer.sharedMaterial = material;
         }
     }
 
@@ -424,15 +430,11 @@ public class BuildingManager : MonoBehaviour
 
     private bool IsPointerOverUIElement()
     {
-        PointerEventData eventData = new PointerEventData(eventSystem)
-        {
-            position = Mouse.current.position.ReadValue()
-        };
+        m_pointerEventData.position = Mouse.current.position.ReadValue();
+        m_raycastResults.Clear();
+        uiRaycaster.Raycast(m_pointerEventData, m_raycastResults);
 
-        List<RaycastResult> results = new List<RaycastResult>();
-        uiRaycaster.Raycast(eventData, results);
-
-        foreach (RaycastResult result in results)
+        foreach (RaycastResult result in m_raycastResults)
         {
             if (uiElementsToBlock.Contains(result.gameObject))
             {
@@ -501,9 +503,9 @@ public class BuildingManager : MonoBehaviour
             {
                 if (!originalMaterials.ContainsKey(renderer))
                 {
-                    originalMaterials[renderer] = renderer.material; // Store the original material
+                    originalMaterials[renderer] = renderer.sharedMaterial;
                 }
-                renderer.material = hoverMaterial; // Apply hover material
+                renderer.sharedMaterial = hoverMaterial;
             }
         }
     }
@@ -516,7 +518,7 @@ public class BuildingManager : MonoBehaviour
             {
                 if (originalMaterials.TryGetValue(renderer, out Material originalMaterial))
                 {
-                    renderer.material = originalMaterial; // Restore original material
+                    renderer.sharedMaterial = originalMaterial;
                 }
             }
         }

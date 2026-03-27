@@ -78,7 +78,11 @@ public partial struct SwarmerSteeringSystem : ISystem, ISystemNewScene
                 alignment = cellHeading;
 
             // --- Separation (Phase-1 Burst job writes this; synced to ECS each tick) ---
-            float2 sep = separation.Value.xz;
+            // Normalize before blending so a dense pile (many neighbors) doesn't
+            // produce a contribution 50x larger than the target or alignment terms.
+            float2 rawSep = separation.Value.xz;
+            float  sepLen = math.length(rawSep);
+            float2 sep    = sepLen > 0.001f ? rawSep / sepLen : float2.zero;
 
             // Derive avoidance direction from current ECS heading so it's never stale.
             // In Unity XZ: right-perpendicular of forward (fx, fz) = (fz, -fx).
