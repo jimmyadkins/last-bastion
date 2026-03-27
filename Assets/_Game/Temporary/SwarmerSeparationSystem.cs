@@ -58,23 +58,26 @@ public partial struct SwarmerSeparationSystem : ISystem, ISystemNewScene
             .Complete();
 
         // ── Step 3: FindPairs — accumulate per-entity separation contributions ──────
-        var contributions = new NativeParallelMultiHashMap<int, float3>(
-            count * 6, state.WorldUpdateAllocator);
+        // Use a flat NativeArray<float3> indexed by entity-in-query index.
+        // ScheduleSingle keeps it single-threaded so we can accumulate directly
+        // without atomics or a hash map, eliminating the "HashMap is full" error
+        // that occurs under dense clustering (worst-case O(n²) pairs).
+        var separations = CollectionHelper.CreateNativeArray<float3>(count, state.WorldUpdateAllocator);
 
         var processor = new SeparationProcessor
         {
-            Contributions = contributions.AsParallelWriter(),
-            Radii         = radii,
+            Separations = separations,
+            Radii       = radii,
         };
 
         Physics.FindPairs(in layer, in layer, in processor)
-            .ScheduleParallelByA(default)
+            .ScheduleSingle(default)
             .Complete();
 
-        // ── Step 4: Reduce contributions → SwarmerSeparation ─────────────────────
+        // ── Step 4: Write accumulated separations → SwarmerSeparation ────────────
         new ReduceContributionsJob
         {
-            Contributions = contributions,
+            Separations = separations,
         }.Schedule(m_query, default).Complete();
 
         state.Dependency = default;
@@ -108,8 +111,9 @@ public partial struct SwarmerSeparationSystem : ISystem, ISystemNewScene
     [BurstCompile]
     private struct SeparationProcessor : IFindPairsProcessor
     {
-        public NativeParallelMultiHashMap<int, float3>.ParallelWriter Contributions;
-        [ReadOnly] public NativeArray<float> Radii;
+        // Direct array indexed by sourceIndex — safe because ScheduleSingle is single-threaded.
+        [NativeDisableParallelForRestriction] public NativeArray<float3> Separations;
+        [ReadOnly]                            public NativeArray<float>   Radii;
 
         public void Execute(in FindPairsResult result)
         {
@@ -129,26 +133,21 @@ public partial struct SwarmerSeparationSystem : ISystem, ISystemNewScene
             float scale = 1f / (denom * denom);
             float3 sep  = diff * scale;
 
-            Contributions.Add(result.sourceIndexA,  sep);
-            Contributions.Add(result.sourceIndexB, -sep);
+            Separations[result.sourceIndexA] += sep;
+            Separations[result.sourceIndexB] -= sep;
         }
     }
 
     [BurstCompile]
     private partial struct ReduceContributionsJob : IJobEntity
     {
-        [ReadOnly] public NativeParallelMultiHashMap<int, float3> Contributions;
+        [ReadOnly] public NativeArray<float3> Separations;
 
         public void Execute(
             [EntityIndexInQuery] int index,
             ref SwarmerSeparation separation)
         {
-            float3 total = float3.zero;
-            if (Contributions.TryGetFirstValue(index, out float3 contrib, out var it))
-            {
-                do { total += contrib; } while (Contributions.TryGetNextValue(out contrib, ref it));
-            }
-            separation.Value = total;
+            separation.Value = Separations[index];
         }
     }
 }
