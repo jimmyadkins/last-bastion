@@ -1,3 +1,4 @@
+using System.Collections;
 using UnityEngine;
 using UnityEngine.VFX;
 
@@ -16,15 +17,52 @@ public class Bullet : MonoBehaviour
 
     protected Rigidbody rb;
 
-    private void Awake()
+    // Set by BulletPool when renting so the bullet can return itself.
+    [HideInInspector] public Bullet PoolPrefab;
+
+    private int   m_initialPenetration;
+    private TrailRenderer m_trail;
+
+    protected virtual void Awake()
     {
-        rb = GetComponent<Rigidbody>();
+        rb                 = GetComponent<Rigidbody>();
+        m_initialPenetration = penetration;
+        m_trail            = GetComponentInChildren<TrailRenderer>();
     }
 
-    protected virtual void Start()
+    // OnEnable fires on first activation AND every pool re-use, replacing Start().
+    protected virtual void OnEnable()
+    {
+        StopAllCoroutines();
+        penetration = m_initialPenetration;
+        SetInitialVelocity();
+        StartCoroutine(LifetimeRoutine());
+    }
+
+    protected virtual void SetInitialVelocity()
     {
         rb.linearVelocity = transform.forward * speed;
-        Destroy(gameObject, lifetime);
+    }
+
+    private void OnDisable()
+    {
+        rb.linearVelocity = Vector3.zero;
+        m_trail?.Clear();
+    }
+
+    private IEnumerator LifetimeRoutine()
+    {
+        yield return new WaitForSeconds(lifetime);
+        ReturnToPool();
+    }
+
+    // Call instead of Destroy(gameObject) everywhere.
+    protected void ReturnToPool()
+    {
+        if (BulletPool.Instance != null && PoolPrefab != null)
+            BulletPool.Instance.Return(PoolPrefab, this);
+        else
+            Destroy(gameObject);
     }
 
     // Swarmer SphereCollider is a trigger (no Rigidbody in Phase 4), so direct hits arrive here.
@@ -54,7 +92,7 @@ public class Bullet : MonoBehaviour
         {
             if (explosionSound != null)
                 AudioManager.Instance.PlayEffectAtPosition(explosionSound, transform.position);
-            Destroy(gameObject);
+            ReturnToPool();
         }
     }
 
@@ -64,22 +102,17 @@ public class Bullet : MonoBehaviour
         {
             foreach (var collider in Physics.OverlapSphere(transform.position, ExplosionRadius, 1 << Defines.SwarmerLayer))
             {
-                //Debug.Log("Hit Guy");
-                if (collider.gameObject.TryGetComponent<SwarmerController>(out var balls))
-                {
-                    balls.TakeDamage(ExplosionDamage);
-                }
-            };
+                if (collider.gameObject.TryGetComponent<SwarmerController>(out var splash))
+                    splash.TakeDamage(ExplosionDamage);
+            }
         }
 
         if (explosionEffectPrefab != null)
         {
             VisualEffect explosion = Instantiate(explosionEffectPrefab, transform.position, Quaternion.identity);
             explosion.Play();
-
             Destroy(explosion.gameObject, explosion.GetFloat("Duration"));
         }
-
 
         if (collision.gameObject.TryGetComponent<SwarmerController>(out var enemy))
         {
@@ -90,13 +123,9 @@ public class Bullet : MonoBehaviour
             Vector3 collisionNormal = collision.contacts[0].normal;
             float collisionAngle = Vector3.Angle(collisionNormal, transform.forward) - 90f;
             if (collisionAngle <= Defines.RicochetAngle)
-            {
                 transform.forward = Vector3.Reflect(transform.forward, collisionNormal);
-            }
             else
-            {
                 penetration = 0;
-            }
         }
 
         rb.linearVelocity = transform.forward * speed;
@@ -104,10 +133,8 @@ public class Bullet : MonoBehaviour
         if (--penetration <= 0)
         {
             if (explosionSound != null)
-            {
                 AudioManager.Instance.PlayEffectAtPosition(explosionSound, transform.position);
-            }
-            Destroy(gameObject);
+            ReturnToPool();
         }
     }
 }

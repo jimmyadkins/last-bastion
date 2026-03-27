@@ -19,6 +19,7 @@ public class TurretController : MonoBehaviour
 
     public GameObject bulletPrefab;
     protected float bulletSpeed;
+    protected Bullet m_bulletPrefabComp; // cached component used by pool
     public VisualEffect muzzleFlashVFX;
     public AudioSource FiringAudioSource;
 
@@ -32,16 +33,11 @@ public class TurretController : MonoBehaviour
     {
         if (bulletPrefab != null)
         {
-            Bullet bulletComponent = bulletPrefab.GetComponent<Bullet>();
-            if (bulletComponent != null)
-            {
-                bulletSpeed = bulletComponent.speed;
-                //Debug.Log("Bullet speed: " + bulletSpeed);
-            }
+            m_bulletPrefabComp = bulletPrefab.GetComponent<Bullet>();
+            if (m_bulletPrefabComp != null)
+                bulletSpeed = m_bulletPrefabComp.speed;
             else
-            {
                 Debug.LogWarning("Bullet prefab does not have a Bullet component with a speed property.");
-            }
         }
 
         if (muzzleFlashVFX != null)
@@ -321,9 +317,12 @@ public class TurretController : MonoBehaviour
             FiringAudioSource.PlayOneShot(FiringAudioSource.clip);
         }
 
-        if (bulletPrefab != null && firePoint != null)
+        if (m_bulletPrefabComp != null && firePoint != null)
         {
-            GameObject bulletInstance = Instantiate(bulletPrefab, firePoint.position, firePoint.rotation);
+            if (BulletPool.Instance != null)
+                BulletPool.Instance.Rent(m_bulletPrefabComp, firePoint.position, firePoint.rotation);
+            else
+                Instantiate(bulletPrefab, firePoint.position, firePoint.rotation);
         }
 
         //Debug.Log("Firing at target!");
