@@ -27,6 +27,37 @@ public class Bullet : MonoBehaviour
         Destroy(gameObject, lifetime);
     }
 
+    // Swarmer SphereCollider is a trigger (no Rigidbody in Phase 4), so direct hits arrive here.
+    private void OnTriggerEnter(Collider other)
+    {
+        if (!other.gameObject.TryGetComponent<SwarmerController>(out var enemy)) return;
+
+        if (ExplosionRadius > 0)
+        {
+            foreach (var col in Physics.OverlapSphere(transform.position, ExplosionRadius, 1 << Defines.SwarmerLayer))
+            {
+                if (col.gameObject.TryGetComponent<SwarmerController>(out var splash))
+                    splash.TakeDamage(ExplosionDamage);
+            }
+        }
+
+        if (explosionEffectPrefab != null)
+        {
+            VisualEffect explosion = Instantiate(explosionEffectPrefab, transform.position, Quaternion.identity);
+            explosion.Play();
+            Destroy(explosion.gameObject, explosion.GetFloat("Duration"));
+        }
+
+        enemy.TakeDamage(damage);
+
+        if (--penetration <= 0)
+        {
+            if (explosionSound != null)
+                AudioManager.Instance.PlayEffectAtPosition(explosionSound, transform.position);
+            Destroy(gameObject);
+        }
+    }
+
     private void OnCollisionEnter(Collision collision)
     {
         if (ExplosionRadius > 0)
@@ -53,7 +84,6 @@ public class Bullet : MonoBehaviour
         if (collision.gameObject.TryGetComponent<SwarmerController>(out var enemy))
         {
             enemy.TakeDamage(damage);
-            rb.linearVelocity = transform.forward * speed;
         }
         else
         {

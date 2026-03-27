@@ -5,7 +5,7 @@ public class ArtyController : TurretController
     protected override bool RotateToFaceTarget()
     {
         Vector3 targetPosition = m_target.lastPosition;
-        Vector3 targetVelocity = m_target.rigidbody.linearVelocity;
+        Vector3 targetVelocity = m_target.target != null ? m_target.target.LastKnownVelocity : Vector3.zero;
 
         float g = Mathf.Abs(Physics.gravity.y);
         float timeToImpact = MathFunctions.Sqrt2 * bulletSpeed / g;

@@ -86,16 +86,19 @@ public class TurretController : MonoBehaviour
         m_target.UpdateTarget(controller);
     }
 
+    private static readonly Collider[] s_closeTargetBuffer = new Collider[32];
+
     protected bool FindCloseTarget()
     {
-        Collider[] closeEnemies = Physics.OverlapSphere(transform.position, closeDetectionRange, 1 << Defines.SwarmerLayer);
-        if (closeEnemies.Length > 0)
+        int count = Physics.OverlapSphereNonAlloc(transform.position, closeDetectionRange, s_closeTargetBuffer, 1 << Defines.SwarmerLayer);
+        if (count > 0)
         {
             Transform closest = null;
             float closestDist = float.PositiveInfinity;
 
-            foreach (Collider c in closeEnemies)
+            for (int i = 0; i < count; i++)
             {
+                Collider c = s_closeTargetBuffer[i];
                 Vector3 toTarget = c.transform.position - transform.position;
                 float dist = toTarget.magnitude;
                 toTarget /= dist;
@@ -240,7 +243,7 @@ public class TurretController : MonoBehaviour
     protected virtual bool RotateToFaceTarget()
     {
         Vector3 targetPosition = m_target.lastPosition;
-        Vector3 targetVelocity = m_target.rigidbody.linearVelocity;
+        Vector3 targetVelocity = m_target.target != null ? m_target.target.LastKnownVelocity : Vector3.zero;
 
         Vector3 predictedPosition = CalculatePredictedPosition(targetPosition, targetVelocity);
 
@@ -374,7 +377,6 @@ public class TurretController : MonoBehaviour
     protected struct Target
     {
         public SwarmerController target;
-        public Rigidbody rigidbody { get; private set; }
         public Vector3 lastPosition { get; private set; }
         public bool IsValid { get; private set; }
 
@@ -389,7 +391,6 @@ public class TurretController : MonoBehaviour
             newTarget.MarkTarget();
 
             IsValid = true;
-            rigidbody = target.GetComponent<Rigidbody>();
 
             UpdateTarget();
         }

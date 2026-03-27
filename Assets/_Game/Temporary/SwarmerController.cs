@@ -3,7 +3,6 @@ using Unity.Mathematics;
 using UnityEngine;
 using UnityEngine.VFX;
 
-[RequireComponent(typeof(Rigidbody))]
 public class SwarmerController : MonoBehaviour
 {
     // ── ECS companion entity ──────────────────────────────────────────────
@@ -11,8 +10,8 @@ public class SwarmerController : MonoBehaviour
     private EntityManager m_em;
     private bool m_entityCreated;
 
-    /// <summary>Exposes the Rigidbody to the ECS move-apply system.</summary>
-    public Rigidbody GetRigidbody() => m_rb;
+    /// <summary>Written by SwarmerTransformSyncSystem; read by TurretController for ballistic prediction.</summary>
+    public Vector3 LastKnownVelocity;
 
     [SerializeField] private float maxHealth = 5f;
 
@@ -34,14 +33,14 @@ public class SwarmerController : MonoBehaviour
     private LayerMask m_environmentLayer;
     private LayerMask m_swarmerLayer;
     private LayerMask m_targetsLayer;
-    private Rigidbody m_rb;
 
     private SwarmerManager m_manager;
     private float m_radius;
     public float Radius => m_radius;
 
-    // Written each SyncToECS() by reading SwarmerSeparation from the companion ECS entity (Psyshock result)
-    public Vector3 PrecomputedSeparation;
+    // Avoidance data computed in UpdateSwarmer(), written to ECS in SyncToECS()
+    private int m_avoidanceRotation;
+    private AvoidanceDistances m_lastAvoidanceDist;
 
     // Written by SwarmerManager each FixedUpdate via RaycastCommand batch
     private RaycastHit m_preForwardHit;
@@ -86,7 +85,6 @@ public class SwarmerController : MonoBehaviour
         m_swarmerLayer     = 1 << Defines.SwarmerLayer;
         m_targetsLayer     = 1 << Defines.PlayerLayer;
 
-        m_rb = GetComponent<Rigidbody>();
         m_radius = GetComponent<SphereCollider>().radius;
 
         SwarmerManager.Instance.Register(this);
@@ -271,33 +269,36 @@ public class SwarmerController : MonoBehaviour
             avoidanceRotation = GetAvoidance(favoredRotation, ref d);
         }
 
-        // Separation vector is now precomputed by SwarmerManager via Burst SeparationJob
-        Vector2 separation = PrecomputedSeparation.xz();
-        //Debug.Log(separation);
+        // Store avoidance for SyncToECS() — ECS steering reads SwarmerAvoidanceInput
+        m_avoidanceRotation = avoidanceRotation;
+        m_lastAvoidanceDist = d;
 
-        Vector2 alignment = m_manager.GetCellHeading(transform.position);
-
-        //Vector2 desiredHeading = avoidanceRotation == 0 ? (toTarget + alignment).normalized : transform.right * avoidanceRotation;
-
-        Vector2 desiredHeading = (toTarget * m_manager.TargetWeight +
-                                  alignment * m_manager.AlignmentWeight +
-                                  (transform.right * avoidanceRotation).xz() * d.AvoidanceStrength * m_manager.ObstacleWeight +
-                                  separation * m_manager.SeparationWeight
-                                  ).normalized;
-
-        separationWeight = (separation * m_manager.SeparationWeight).magnitude;
-        obstacleWeight = ((transform.right * avoidanceRotation).xz() * d.AvoidanceStrength * m_manager.ObstacleWeight).magnitude;
-
-
-        //transform.Rotate(new Vector3(0, m_manager.TurnSpeed * (avoidanceRotation == 0 ? favoredRotation * Mathf.Min(Mathf.Abs(cross),1) : avoidanceRotation) * Time.fixedDeltaTime, 0));
-        if (ShowDesiredHeading)
+        // Compute attack state (was in Move()) so SwarmerManager can deal damage
+        m_bAttacking = false;
+        if (m_target != null && !(m_target is HQ))
         {
-            Debug.DrawLine(transform.position, transform.position + MathFunctions.UnflattenVector2(desiredHeading) * 5, Color.magenta);
-            Debug.DrawLine(transform.position, transform.position + MathFunctions.UnflattenVector2(separation), Color.green);
+            float dist = (m_target.GetPosition().xz() - transform.position.xz()).magnitude;
+            if (dist <= m_manager.AttackDistance * 1.5f)
+            {
+                m_bAttacking = m_bFacingTarget;
+                if (m_bAttacking)
+                {
+                    if (attackVFX != null && !(attackVFX.aliveParticleCount > 0))
+                        attackVFX.Play();
+                    if (!m_bAttackingLastFrame)
+                        m_attackAudioSource.Play();
+                    m_bAttackingLastFrame = true;
+                }
+            }
+            else
+            {
+                if (attackVFX != null && attackVFX.aliveParticleCount > 0)
+                    attackVFX.Stop();
+                m_attackAudioSource.Stop();
+                m_bAttackingLastFrame = false;
+            }
         }
-        var targetRotation = Quaternion.LookRotation(MathFunctions.UnflattenVector2(desiredHeading), Vector3.up);
-        transform.rotation = Quaternion.RotateTowards(transform.rotation, targetRotation, m_manager.TurnSpeed * Time.fixedDeltaTime);
-        Move(d);
+        // Rotation and movement are now handled by SwarmerTransformSyncSystem (ECS).
 
     }
 
@@ -423,74 +424,6 @@ public class SwarmerController : MonoBehaviour
         return value == 0 ? value : Mathf.Lerp(1000, 1, percentDistance);
     }
 
-    private void Move(in AvoidanceDistances d)
-    {
-        m_bAttacking = false; // reset
-        Vector2 currentV = m_rb.linearVelocity.xz();
-
-        SwarmerTarget st = SwarmerTarget.Instance;
-        Vector2 targetPos =
-            m_target != null ? m_target.GetPosition().xz() :
-            st != null ? st.transform.position.xz() :
-            transform.position.xz();
-        float distToTarget = (targetPos - transform.position.xz()).magnitude;
-
-        float speed = Mathf.Lerp(1, m_manager.MaxSpeed, Mathf.Clamp01(distToTarget / 5));
-        Vector2 desiredV = transform.forward.xz() * speed;
-
-        // Check if we have a valid target
-        if (m_target != null)
-        {
-            Vector2 toTarget = m_target.GetPosition().xz() - transform.position.xz();
-            float dist = toTarget.magnitude;
-            // check if we are going in for an attack
-            if (m_target is HQ)
-            {
-                // If the target is HQ, move directly toward it at max speed
-                desiredV = (toTarget / dist) * m_manager.MaxSpeed;
-            }
-            else if (dist <= m_manager.AttackDistance * 1.5f)
-            {
-                m_bAttacking = m_bFacingTarget;
-                if (m_bAttacking)
-                {
-                    if (attackVFX != null && !(attackVFX.aliveParticleCount > 0)) // VisualEffect-specific check
-                    {
-                        attackVFX.Play(); // Start the VFX if it's not already playing
-                    }
-                    if (!m_bAttackingLastFrame)
-                    {
-                        m_attackAudioSource.Play();
-                    }
-                    m_bAttackingLastFrame = true;
-                }
-                float value = Mathf.Clamp(0.5f * (dist - m_manager.AttackDistance), -1, 1);
-                desiredV = value * m_manager.MaxSpeed * (toTarget / dist);
-
-            }
-            else
-            {
-                if (attackVFX != null && attackVFX.aliveParticleCount > 0)
-                {
-                    attackVFX.Stop(); // Stop the VFX when not attacking
-                }
-                m_attackAudioSource.Stop();
-                m_bAttacking = false;
-                m_bAttackingLastFrame = false;
-            }
-        }
-
-        Vector2 dv = Vector2.ClampMagnitude(desiredV-currentV, m_manager.Acceleration);
-        m_rb.AddForce(MathFunctions.UnflattenVector2(dv), ForceMode.Impulse);
-
-        if (DeservesSlowdown(d.CenterDistance) ||
-            DeservesSlowdown(d.RightDistance) ||
-            DeservesSlowdown(d.LeftDistance))
-        {
-            m_rb.linearVelocity *= .1f;
-        };
-    }
-
     private bool DeservesSlowdown(float distance)
     {
         return distance != 0 && distance < m_manager.ObstacleAvoidSlowdownRange;
@@ -524,13 +457,22 @@ public class SwarmerController : MonoBehaviour
         var world = World.DefaultGameObjectInjectionWorld;
         if (world == null || !world.IsCreated || !m_em.Exists(m_entity)) return;
 
-        Vector3 pos3 = transform.position;
-        Vector3 fwd3 = transform.forward;
-        m_em.SetComponentData(m_entity, new SwarmerPosition { Value   = new float3(pos3.x, pos3.y, pos3.z) });
-        m_em.SetComponentData(m_entity, new SwarmerHeading  { Forward = new float3(fwd3.x, fwd3.y, fwd3.z) });
-        Vector3 vel = m_rb.linearVelocity;
-        m_em.SetComponentData(m_entity, new SwarmerVelocity { Value = new float3(vel.x, vel.y, vel.z) });
-        // SwarmerSeparation is written by SwarmerSeparationSystem (Psyshock FindPairs) — not synced from MB.
+        // Clear stale target reference before UpdateSwarmer() gets a chance to run.
+        if (m_target != null && (m_target as Component) == null)
+            m_target = null;
+
+        // Phase 4: ECS owns position, velocity, and heading — do not overwrite them here.
+
+        // Write avoidance data computed last frame in UpdateSwarmer().
+        // AvoidanceRotation is a raw scalar — ECS derives the world direction from
+        // SwarmerHeading so avoidance is never based on a stale transform.right.
+        m_em.SetComponentData(m_entity, new SwarmerAvoidanceInput
+        {
+            AvoidanceRotation = m_avoidanceRotation,
+            Strength          = m_lastAvoidanceDist.AvoidanceStrength,
+            // Only slow down for obstacles directly ahead — lateral walls (tunnels) must not trigger this.
+            ShouldSlowDown    = DeservesSlowdown(m_lastAvoidanceDist.CenterDistance),
+        });
 
         SwarmerTarget st = SwarmerTarget.Instance;
         Vector3 rawTargetPos =
@@ -548,11 +490,6 @@ public class SwarmerController : MonoBehaviour
         });
 
         m_em.SetComponentData(m_entity, new SwarmerIsAttacking { Value = m_bAttacking });
-
-        // Read Psyshock separation back from ECS → MB uses it in UpdateSwarmer steering
-        var ecsSep = m_em.GetComponentData<SwarmerSeparation>(m_entity);
-        PrecomputedSeparation = new Vector3(ecsSep.Value.x, ecsSep.Value.y, ecsSep.Value.z);
-
     }
 
     private bool m_bMarked = false;

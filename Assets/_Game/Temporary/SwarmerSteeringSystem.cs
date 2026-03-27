@@ -45,6 +45,7 @@ public partial struct SwarmerSteeringSystem : ISystem, ISystemNewScene
         {
             Config       = config,
             CellHeadings = gridData.CellHeadings,
+            DeltaTime    = SystemAPI.Time.DeltaTime,
         }.ScheduleParallel(state.Dependency);
     }
 
@@ -53,6 +54,7 @@ public partial struct SwarmerSteeringSystem : ISystem, ISystemNewScene
     {
         [ReadOnly] public SwarmerConfig                        Config;
         [ReadOnly] public NativeParallelHashMap<int2, float2>  CellHeadings;
+        public float                                           DeltaTime;
 
         public void Execute(
             in  SwarmerPosition        pos,
@@ -76,9 +78,13 @@ public partial struct SwarmerSteeringSystem : ISystem, ISystemNewScene
                 alignment = cellHeading;
 
             // --- Separation (Phase-1 Burst job writes this; synced to ECS each tick) ---
-            float2 sep      = separation.Value.xz;
-            float2 avoidDir = avoidance.AvoidanceDir.xz;
-            float  avoidStr = avoidance.Strength;
+            float2 sep = separation.Value.xz;
+
+            // Derive avoidance direction from current ECS heading so it's never stale.
+            // In Unity XZ: right-perpendicular of forward (fx, fz) = (fz, -fx).
+            float2 headingRight = new float2(fwd.y, -fwd.x); // fwd is xz float2, so .y == world-Z
+            float2 avoidDir     = headingRight * avoidance.AvoidanceRotation;
+            float  avoidStr     = avoidance.Strength;
 
             // --- Desired heading blend ---
             float2 desired = toTargetN  * Config.TargetWeight    +
@@ -92,15 +98,24 @@ public partial struct SwarmerSteeringSystem : ISystem, ISystemNewScene
             // --- Desired speed ---
             float speed = math.lerp(1f, Config.MaxSpeed, math.saturate(distToTarget / 5f));
 
+            bool inAttackBlock = false;
+
             if (target.HasTarget && !target.IsHQTarget)
             {
                 float2 toTgt = target.Value.xz - pos.Value.xz;
                 float  dist  = math.length(toTgt);
                 if (dist <= Config.AttackDistance * 1.5f)
                 {
-                    float value = math.clamp(0.5f * (dist - Config.AttackDistance), -1f, 1f);
-                    speed    = value * Config.MaxSpeed;
+                    inAttackBlock = true;
                     desiredN = dist > 0.001f ? toTgt / dist : fwd;
+                    float offset = dist - Config.AttackDistance;
+                    // Deadband: hold position within ±10% of AttackDistance.
+                    // Only approach — never actively back off (separation handles spacing).
+                    const float kDeadbandFraction = 0.1f;
+                    float deadband = Config.AttackDistance * kDeadbandFraction;
+                    speed = offset > deadband
+                        ? math.clamp(0.5f * offset, 0f, 1f) * Config.MaxSpeed
+                        : 0f;
                 }
             }
             else if (target.IsHQTarget)
@@ -111,14 +126,25 @@ public partial struct SwarmerSteeringSystem : ISystem, ISystemNewScene
                 speed    = Config.MaxSpeed;
             }
 
-            if (avoidance.ShouldSlowDown)
+            // Don't slow down while attacking — the swarmer is supposed to be next to its target.
+            if (avoidance.ShouldSlowDown && !inAttackBlock)
                 speed *= 0.1f;
 
-            float3 desiredDir = new float3(desiredN.x, 0f, desiredN.y);
-            desiredVelocity   = new SwarmerDesiredVelocity { Value = desiredDir * speed };
+            // Rotate heading toward desired direction at TurnSpeed — matches old RotateTowards behaviour.
+            // Velocity then follows the NEW heading, not the raw blend, so competing side-forces
+            // (e.g. both walls in a tunnel) don't flip velocity direction every frame.
+            float maxAngle   = math.radians(Config.TurnSpeed * DeltaTime);
+            float cosAngle   = math.clamp(math.dot(fwd, desiredN), -1f, 1f);
+            float angle      = math.acos(cosAngle);
+            float2 newFwd    = angle < 0.0001f
+                ? desiredN
+                : math.normalizesafe(math.lerp(fwd, desiredN, math.min(1f, maxAngle / angle)));
+
+            float3 newDir   = new float3(newFwd.x, 0f, newFwd.y);
+            desiredVelocity = new SwarmerDesiredVelocity { Value = newDir * speed };
 
             // Update heading for next frame's grid accumulation
-            heading = new SwarmerHeading { Forward = desiredDir };
+            heading = new SwarmerHeading { Forward = newDir };
         }
     }
 }

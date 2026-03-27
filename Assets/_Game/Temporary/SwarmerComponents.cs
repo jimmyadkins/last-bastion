@@ -27,9 +27,11 @@ public struct SwarmerTargetPos : IComponentData
 // ─── Avoidance (written by SwarmerController each tick, before ECS runs) ─────
 public struct SwarmerAvoidanceInput : IComponentData
 {
-    public float3 AvoidanceDir;
-    public float  Strength;
-    public bool   ShouldSlowDown;
+    // -1 = turn left, 0 = no avoidance, 1 = turn right.
+    // ECS computes the world-space direction from SwarmerHeading so it's never stale.
+    public int   AvoidanceRotation;
+    public float Strength;
+    public bool  ShouldSlowDown;
 }
 
 // ─── Steering output ─────────────────────────────────────────────────────────
@@ -63,6 +65,7 @@ public struct SwarmerConfig : IComponentData
     public float AttackDistance;
     public float CellSize;
     public float TargetDestroyDistance;
+    public float LinearDamping;
 }
 
 // ─── Grid data stored on worldBlackboardEntity (ICollectionComponent) ────────

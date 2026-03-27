@@ -1,73 +1,56 @@
-using Unity.Collections;
+using Latios;
+using Unity.Burst;
 using Unity.Entities;
-using UnityEngine;
+using Unity.Mathematics;
 
 /// <summary>
-/// Main-thread managed system.
-/// Reads SwarmerDesiredVelocity written by the Burst steering job and applies
-/// it as a Rigidbody impulse via the companion MonoBehaviour.
-///
-/// Managed by SwarmerSuperSystem — [DisableAutoCreation] prevents Unity from
-/// registering it a second time in the default groups.
+/// Phase 4: pure kinematic ECS integration — no Rigidbody.
+/// Reads SwarmerDesiredVelocity written by SwarmerSteeringSystem, clamps the
+/// velocity delta to Config.Acceleration, and integrates SwarmerPosition.
+/// SwarmerTransformSyncSystem (runs after) writes the result to companion Transform.
 /// </summary>
-[DisableAutoCreation]
-public partial class SwarmerMoveApplySystem : SystemBase
+[BurstCompile]
+public partial struct SwarmerMoveApplySystem : ISystem, ISystemNewScene
 {
-    private EntityQuery m_query;
+    public void OnNewScene(ref SystemState state) { }
 
-    protected override void OnCreate()
+    [BurstCompile]
+    public void OnCreate(ref SystemState state) { }
+
+    [BurstCompile]
+    public void OnUpdate(ref SystemState state)
     {
-        m_query = GetEntityQuery(
-            ComponentType.ReadWrite<SwarmerPosition>(),
-            ComponentType.ReadOnly<SwarmerDesiredVelocity>(),
-            ComponentType.ReadOnly<SwarmerCompanionRef>());
+        var wbb = state.GetLatiosWorldUnmanaged().worldBlackboardEntity;
+        if (!wbb.HasComponent<SwarmerConfig>()) return;
+        var config = wbb.GetComponentData<SwarmerConfig>();
 
-        RequireForUpdate<SwarmerConfig>();
+        state.Dependency = new IntegrateJob
+        {
+            Config    = config,
+            DeltaTime = SystemAPI.Time.DeltaTime,
+        }.ScheduleParallel(state.Dependency);
     }
 
-    protected override void OnUpdate()
+    [BurstCompile]
+    private partial struct IntegrateJob : IJobEntity
     {
-        var config = SystemAPI.GetSingleton<SwarmerConfig>();
+        public SwarmerConfig Config;
+        public float         DeltaTime;
 
-        var entities     = m_query.ToEntityArray(Allocator.Temp);
-        var positions    = m_query.ToComponentDataArray<SwarmerPosition>(Allocator.Temp);
-        var desiredVels  = m_query.ToComponentDataArray<SwarmerDesiredVelocity>(Allocator.Temp);
-
-        for (int i = 0; i < entities.Length; i++)
+        public void Execute(
+            ref SwarmerPosition        pos,
+            ref SwarmerVelocity        vel,
+            in  SwarmerDesiredVelocity desired)
         {
-            var companion = EntityManager.GetComponentObject<SwarmerCompanionRef>(entities[i]);
-            SwarmerController mb = companion?.MB;
-            if (mb == null) continue;
+            float3 dv    = desired.Value - vel.Value;
+            float  dvLen = math.length(dv);
+            if (dvLen > Config.Acceleration)
+                dv *= Config.Acceleration / dvLen;
 
-            Rigidbody rb = mb.GetRigidbody();
-            if (rb == null) continue;
-
-            Vector3 currentV = rb.linearVelocity;
-            var     dv3      = desiredVels[i].Value;
-            Vector3 desired  = new Vector3(dv3.x, dv3.y, dv3.z);
-
-            Vector3 dv = Vector3.ClampMagnitude(desired - currentV, config.Acceleration);
-            rb.AddForce(dv, ForceMode.Impulse);
-
-            // Rotate toward desired heading
-            if (desired.sqrMagnitude > 0.001f)
-            {
-                Quaternion targetRot = Quaternion.LookRotation(desired.normalized, Vector3.up);
-                mb.transform.rotation = Quaternion.RotateTowards(
-                    mb.transform.rotation, targetRot,
-                    config.TurnSpeed * SystemAPI.Time.fixedDeltaTime);
-            }
-
-            // Write back updated position
-            var p = mb.transform.position;
-            positions[i] = new SwarmerPosition { Value = new Unity.Mathematics.float3(p.x, p.y, p.z) };
+            vel.Value   += dv;
+            vel.Value   *= math.max(0f, 1f - Config.LinearDamping * DeltaTime);
+            vel.Value.y  = 0f;           // enforce flat movement — no gravity without Rigidbody
+            pos.Value   += vel.Value * DeltaTime;
         }
-
-        // Flush positions back
-        m_query.CopyFromComponentDataArray(positions);
-
-        entities.Dispose();
-        positions.Dispose();
-        desiredVels.Dispose();
     }
 }

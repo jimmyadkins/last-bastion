@@ -2,7 +2,7 @@ using Latios;
 using Unity.Entities;
 
 /// <summary>
-/// Root super-system for all Phase-2 swarmer ECS logic.
+/// Root super-system for all swarmer ECS logic.
 /// Runs inside FixedStepSimulationSystemGroup so physics timing is respected.
 /// </summary>
 [UpdateInGroup(typeof(FixedStepSimulationSystemGroup))]
@@ -13,9 +13,10 @@ public partial class SwarmerSuperSystem : RootSuperSystem
         GetOrCreateAndAddUnmanagedSystem<SwarmerGridUpdateSystem>();
         GetOrCreateAndAddUnmanagedSystem<SwarmerSeparationSystem>();
         GetOrCreateAndAddUnmanagedSystem<SwarmerSteeringSystem>();
-        // SwarmerMoveApplySystem disabled: MB still owns Rigidbody movement in Phase 3.
-        // Re-enable when Phase 4 removes the Rigidbody and ECS owns kinematic integration.
-        // GetOrCreateAndAddManagedSystem<SwarmerMoveApplySystem>();
+        // Phase 4: ECS owns kinematic integration — no Rigidbody.
+        GetOrCreateAndAddUnmanagedSystem<SwarmerMoveApplySystem>();
+        // Phase 4: write ECS position/velocity/heading → companion Transform each tick.
+        GetOrCreateAndAddManagedSystem<SwarmerTransformSyncSystem>();
         GetOrCreateAndAddManagedSystem<SwarmerAttackSystem>();
         GetOrCreateAndAddManagedSystem<SwarmerDeathSystem>();
     }

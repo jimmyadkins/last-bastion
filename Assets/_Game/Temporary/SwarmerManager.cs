@@ -14,6 +14,7 @@ public class SwarmerManager : MonoBehaviour
     [Header("Movement")]
     public float MaxSpeed;
     public float Acceleration;
+    public float LinearDamping;
     public float TurnSpeed;
     public float AvoidanceAngle;
     public float ObstacleAvoidDistance;
@@ -74,6 +75,7 @@ public class SwarmerManager : MonoBehaviour
         {
             MaxSpeed                 = MaxSpeed,
             Acceleration             = Acceleration,
+            LinearDamping            = LinearDamping,
             TurnSpeed                = TurnSpeed,
             TargetWeight             = TargetWeight,
             AlignmentWeight          = AlignmentWeight,
