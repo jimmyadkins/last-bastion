@@ -36,7 +36,7 @@ public partial class BulletWallHitSystem : SystemBase
                 continue;
 
             Vector3 normal = hit.normal;
-            float angle = Vector3.Angle(normal, -(Vector3)vel.ValueRO.Value.normalized) - 90f;
+            float angle = Vector3.Angle(normal, -(Vector3)math.normalize(vel.ValueRO.Value)) - 90f;
 
             if (angle <= Defines.RicochetAngle)
             {
