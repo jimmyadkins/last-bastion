@@ -17,10 +17,10 @@ public partial struct BulletMoveSystem : ISystem
     [BurstCompile]
     public void OnUpdate(ref SystemState state)
     {
-        float dt      = SystemAPI.Time.fixedDeltaTime;
+        float dt      = SystemAPI.Time.DeltaTime;
         float gravity = -9.81f; // standard; match Physics.gravity.y if needed
 
-        new MoveJob { DeltaTime = dt, GravityY = gravity }.ScheduleParallel();
+        state.Dependency = new MoveJob { DeltaTime = dt, GravityY = gravity }.ScheduleParallel(state.Dependency);
     }
 
     [BurstCompile]

@@ -1,3 +1,4 @@
+using Unity.Collections;
 using Unity.Entities;
 using UnityEngine;
 
@@ -11,14 +12,29 @@ using UnityEngine;
 [DisableAutoCreation]
 public partial class BulletTransformSyncSystem : SystemBase
 {
+    private EntityQuery m_query;
+
+    protected override void OnCreate()
+    {
+        m_query = new EntityQueryBuilder(Allocator.Temp)
+            .WithAll<BulletPosition, BulletCompanionRef>()
+            .WithDisabled<BulletDeadTag>()
+            .Build(this);
+    }
+
     protected override void OnUpdate()
     {
-        foreach (var (pos, companionRef) in
-            SystemAPI.Query<RefRO<BulletPosition>, BulletCompanionRef>()
-            .WithDisabled<BulletDeadTag>())
+        var entities  = m_query.ToEntityArray(Allocator.Temp);
+        var positions = m_query.ToComponentDataArray<BulletPosition>(Allocator.Temp);
+
+        for (int i = 0; i < entities.Length; i++)
         {
-            if (companionRef.MB != null)
-                companionRef.MB.transform.position = pos.ValueRO.Value;
+            var cr = EntityManager.GetComponentObject<BulletCompanionRef>(entities[i]);
+            if (cr?.MB != null)
+                cr.MB.transform.position = positions[i].Value;
         }
+
+        entities.Dispose();
+        positions.Dispose();
     }
 }
