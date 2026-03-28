@@ -319,8 +319,8 @@ public class TurretController : MonoBehaviour
 
         if (m_bulletPrefabComp != null && firePoint != null)
         {
-            if (BulletPool.Instance != null)
-                BulletPool.Instance.Rent(m_bulletPrefabComp, firePoint.position, firePoint.rotation);
+            if (BulletSpawner.Instance != null)
+                BulletSpawner.Instance.Spawn(m_bulletPrefabComp, firePoint.position, firePoint.rotation);
             else
                 Instantiate(bulletPrefab, firePoint.position, firePoint.rotation);
         }

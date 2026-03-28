@@ -23,14 +23,27 @@ public static class BulletPoolSetup
     [MenuItem("Last Bastion/Setup/Add BulletPool to Scene")]
     public static void AddBulletPoolToScene()
     {
-        if (Object.FindFirstObjectByType<BulletPool>() != null)
+        var existingPool = Object.FindFirstObjectByType<BulletPool>();
+        if (existingPool != null)
         {
-            EditorUtility.DisplayDialog("BulletPool", "A BulletPool already exists in this scene.", "OK");
+            // Phase B upgrade: add BulletSpawner if not already present.
+            if (existingPool.GetComponent<BulletSpawner>() == null)
+            {
+                Undo.AddComponent<BulletSpawner>(existingPool.gameObject);
+                EditorUtility.DisplayDialog("BulletPool",
+                    "BulletSpawner added to the existing BulletPool GameObject.\nSave the scene to keep the change.",
+                    "OK");
+            }
+            else
+            {
+                EditorUtility.DisplayDialog("BulletPool", "BulletPool and BulletSpawner already exist in this scene.", "OK");
+            }
             return;
         }
 
         var go = new GameObject("BulletPool");
         var pool = go.AddComponent<BulletPool>();
+        go.AddComponent<BulletSpawner>();
 
         var entries = new BulletPool.Entry[k_prefabPaths.Length];
         for (int i = 0; i < k_prefabPaths.Length; i++)
@@ -62,7 +75,7 @@ public static class BulletPoolSetup
         Selection.activeGameObject = go;
 
         EditorUtility.DisplayDialog("BulletPool",
-            "BulletPool added and pre-populated.\n\nReview the pool sizes in the Inspector, then save the scene.",
+            "BulletPool + BulletSpawner added and pre-populated.\n\nReview the pool sizes in the Inspector, then save the scene.",
             "OK");
     }
 }
