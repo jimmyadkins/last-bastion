@@ -32,18 +32,27 @@ public partial class BulletSwarmerHitSystem : SystemBase
         var swarmerPositions = m_swarmerQuery.ToComponentDataArray<SwarmerPosition>(Allocator.Temp);
         var swarmerRadii     = m_swarmerQuery.ToComponentDataArray<SwarmerRadius>(Allocator.Temp);
 
-        foreach (var (pos, data, dead) in
+        foreach (var (pos, prevPos, data, dead) in
             SystemAPI.Query<
                 RefRO<BulletPosition>,
+                RefRO<BulletPrevPosition>,
                 RefRW<BulletData>,
                 EnabledRefRW<BulletDeadTag>>()
             .WithDisabled<BulletDeadTag>())
         {
-            float3 bulletPos = pos.ValueRO.Value;
+            float3 a = prevPos.ValueRO.Value; // start of this frame's sweep
+            float3 b = pos.ValueRO.Value;     // end of this frame's sweep
+            float3 ab = b - a;
+            float abLenSq = math.lengthsq(ab);
 
             for (int si = 0; si < swarmerEntities.Length; si++)
             {
-                float dist = math.distance(bulletPos, swarmerPositions[si].Value);
+                // Closest point on segment (a→b) to swarmer center.
+                float3 ap = swarmerPositions[si].Value - a;
+                float t = abLenSq > 0f ? math.clamp(math.dot(ap, ab) / abLenSq, 0f, 1f) : 0f;
+                float3 closest = a + t * ab;
+                float dist = math.distance(closest, swarmerPositions[si].Value);
+
                 if (dist > data.ValueRO.ColliderRadius + swarmerRadii[si].Value) continue;
 
                 var swarmerRef = EntityManager.GetComponentObject<SwarmerCompanionRef>(swarmerEntities[si]);
