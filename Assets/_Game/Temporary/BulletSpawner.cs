@@ -66,6 +66,7 @@ public class BulletSpawner : MonoBehaviour
                 ExplosionRadius  = prefab.ExplosionRadius,
                 ExplosionDamage  = prefab.ExplosionDamage,
                 AffectedByGravity = prefab.AffectedByGravity,
+                CanRicochet       = prefab.CanRicochet,
             },
         });
     }

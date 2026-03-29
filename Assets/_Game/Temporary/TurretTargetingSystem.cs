@@ -300,11 +300,33 @@ public partial class TurretTargetingSystem : SystemBase
 
                 claimedCells.Add(bestCell);
 
-                // Lead-predict: offset aim point by heading × maxSpeed × flight time.
+                // Lead-predict: offset aim point by heading × maxSpeed × actual flight time.
+                // ArtyController uses a high-arc trajectory — flight time varies with range:
+                //   baseFlight = sqrt(2)*v/g (≈4.3s at max range)
+                //   prop = horzDist / (v * baseFlight)
+                //   elevation = acos(prop)  →  flightTime = 2*v*sin(elevation)/g
+                // This is longer than baseFlight for shorter distances (high arc takes longer).
                 float3 cellCenter3 = new float3(bestCell.x * CellSize + halfCell, 0f, bestCell.y * CellSize + halfCell);
-                float  flightTime  = math.sqrt(2f) * Arty[ai].BulletSpeed / Gravity;
-                float2 heading     = CellHeadingMap.TryGetValue(bestCell, out float2 h) ? h : float2.zero;
-                float3 aimPos      = cellCenter3 + new float3(heading.x, 0f, heading.y) * SwarmerMaxSpeed * flightTime;
+                float  baseFlight  = math.sqrt(2f) * Arty[ai].BulletSpeed / Gravity;
+                float  horzDist    = math.distance(new float3(artyPos.x, 0f, artyPos.z), new float3(cellCenter3.x, 0f, cellCenter3.z));
+                float  prop        = horzDist / (Arty[ai].BulletSpeed * baseFlight);
+                float  flightTime  = baseFlight; // fallback (45° max range)
+                if (prop < 1f)
+                {
+                    float elevation = math.acos(prop);
+                    flightTime = 2f * Arty[ai].BulletSpeed * math.sin(elevation) / Gravity;
+                }
+                float2 heading = CellHeadingMap.TryGetValue(bestCell, out float2 h) ? h : float2.zero;
+                float3 aimPos  = cellCenter3 + new float3(heading.x, 0f, heading.y) * SwarmerMaxSpeed * flightTime;
+
+                // Clamp: if lead pushes aim beyond detection range, scale it back to range boundary.
+                // Prevents ArtyController.RotateToFaceTarget returning false (can't reach).
+                float aimDistSq = math.distancesq(artyPos, aimPos);
+                if (aimDistSq > rangeSq)
+                {
+                    float3 toAim = math.normalize(aimPos - artyPos);
+                    aimPos = artyPos + toAim * Arty[ai].Range * 0.95f;
+                }
 
                 AimPositions[ai]  = aimPos;
                 HasAssignment[ai] = true;

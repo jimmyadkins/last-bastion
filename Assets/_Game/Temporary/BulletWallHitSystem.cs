@@ -5,7 +5,13 @@ using UnityEngine;
 /// <summary>
 /// Main-thread managed system.
 /// Sweeps a ray from BulletPrevPosition to BulletPosition each tick.
-/// On environment hit: ricochets (angle &lt;= RicochetAngle) or marks bullet dead.
+/// On environment hit:
+///   - If CanRicochet and impact is shallow (impactAngle > RicochetAngle): ricochet.
+///   - Otherwise: mark bullet dead (triggers AoE explosion via BulletDeathSystem).
+///
+/// impactAngle = Vector3.Angle(surface_normal, -velocity_direction).
+/// 0° = head-on (perpendicular), 90° = grazing (parallel to surface).
+/// RicochetAngle = 80° means only very shallow grazes ricochet.
 ///
 /// [DisableAutoCreation] — managed by BulletSuperSystem only.
 /// </summary>
@@ -17,11 +23,12 @@ public partial class BulletWallHitSystem : SystemBase
 
     protected override void OnUpdate()
     {
-        foreach (var (pos, prevPos, vel, dead) in
+        foreach (var (pos, prevPos, vel, data, dead) in
             SystemAPI.Query<
                 RefRW<BulletPosition>,
                 RefRO<BulletPrevPosition>,
                 RefRW<BulletVelocity>,
+                RefRO<BulletData>,
                 EnabledRefRW<BulletDeadTag>>()
             .WithDisabled<BulletDeadTag>())
         {
@@ -35,15 +42,15 @@ public partial class BulletWallHitSystem : SystemBase
             if (!Physics.Raycast(from, disp / dist, out RaycastHit hit, dist, k_hitMask))
                 continue;
 
-            Vector3 normal = hit.normal;
-            float angle = Vector3.Angle(normal, -(Vector3)math.normalize(vel.ValueRO.Value)) - 90f;
-
-            if (angle <= Defines.RicochetAngle)
+            Vector3 normal      = hit.normal;
+            float   impactAngle = Vector3.Angle(normal, -(Vector3)math.normalize(vel.ValueRO.Value));
+            // impactAngle: 0° = head-on, 90° = grazing.
+            // Ricochet only for very shallow grazing impacts AND if this bullet type can ricochet.
+            if (data.ValueRO.CanRicochet && impactAngle > Defines.RicochetAngle)
             {
-                // Reflect velocity and snap position to hit point.
                 float3 reflected = math.reflect(vel.ValueRO.Value, (float3)normal);
                 vel.ValueRW.Value = reflected;
-                pos.ValueRW.Value = (float3)hit.point + (float3)normal * 0.01f; // small offset to avoid re-hit
+                pos.ValueRW.Value = (float3)hit.point + (float3)normal * 0.01f;
             }
             else
             {

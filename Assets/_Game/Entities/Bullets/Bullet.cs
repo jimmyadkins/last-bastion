@@ -23,6 +23,8 @@ public class Bullet : MonoBehaviour
     public bool  AffectedByGravity = false;
     [Tooltip("Sphere radius used by BulletSwarmerHitSystem for hit detection.")]
     public float ColliderRadius    = 0.2f;
+    [Tooltip("False for arty/explosives — always explode on wall/ground hit, never ricochet.")]
+    public bool  CanRicochet       = true;
 
     public VisualEffect explosionEffectPrefab;
     public AudioClip    explosionSound;

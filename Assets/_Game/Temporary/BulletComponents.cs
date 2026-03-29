@@ -16,6 +16,7 @@ public struct BulletData : IComponentData
     public float ExplosionRadius;   // 0 = no AoE
     public float ExplosionDamage;
     public bool  AffectedByGravity; // true for ArtyBullet
+    public bool  CanRicochet;       // false for arty/railgun — always explode on wall hit
 }
 
 // ── Companion link (managed) ─────────────────────────────────────────────────
