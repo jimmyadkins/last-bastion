@@ -12,8 +12,8 @@ using UnityEngine;
 [DisableAutoCreation]
 public partial class BulletWallHitSystem : SystemBase
 {
-    private static readonly int k_hitMask =
-        (1 << Defines.EnvironmentLayer) | (1 << Defines.PlayerLayer);
+    // Only block on environment/obstacles. User-placed walls (PlayerLayer) are passed through.
+    private static readonly int k_hitMask = 1 << Defines.EnvironmentLayer;
 
     protected override void OnUpdate()
     {
