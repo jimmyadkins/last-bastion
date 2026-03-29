@@ -33,8 +33,15 @@ public partial class BulletTransformSyncSystem : SystemBase
         for (int i = 0; i < entities.Length; i++)
         {
             var cr = EntityManager.GetComponentObject<BulletCompanionRef>(entities[i]);
-            if (cr?.MB != null)
-                cr.MB.transform.position = positions[i].Value;
+            if (cr?.MB == null) continue;
+
+            UnityEngine.Vector3 newPos = positions[i].Value;
+            cr.MB.transform.position = newPos;
+
+            // If a Rigidbody is still present, sync its physics position too so
+            // PhysX doesn't snap the GO back on the next FixedUpdate.
+            if (cr.MB.TryGetComponent<UnityEngine.Rigidbody>(out var rb))
+                rb.position = newPos;
         }
 
         entities.Dispose();
