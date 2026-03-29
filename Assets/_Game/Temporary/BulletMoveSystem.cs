@@ -31,8 +31,6 @@ public partial class BulletMoveSystem : SystemBase
 
         var entities = m_query.ToEntityArray(Allocator.Temp);
 
-        UnityEngine.Debug.Log($"[BulletMoveSystem] dt={dt:F4} entities={entities.Length}");
-
         for (int i = 0; i < entities.Length; i++)
         {
             var e    = entities[i];

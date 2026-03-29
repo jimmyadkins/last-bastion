@@ -35,11 +35,6 @@ public class Bullet : MonoBehaviour
     protected virtual void Awake()
     {
         m_trail = GetComponentInChildren<TrailRenderer>();
-
-        // Until the Rigidbody is removed from the prefab, force kinematic so
-        // PhysX doesn't fight ECS position updates.
-        if (TryGetComponent<Rigidbody>(out var rb))
-            rb.isKinematic = true;
     }
 
     private void OnDisable()

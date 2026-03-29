@@ -16,8 +16,6 @@ public partial class BulletSpawnSystem : SystemBase
         var pending = BulletSpawner.Instance.PendingSpawns;
         if (pending.Count == 0) return;
 
-        UnityEngine.Debug.Log($"[BulletSpawnSystem] Creating {pending.Count} bullet entities");
-
         foreach (var req in pending)
         {
             Entity e = EntityManager.CreateEntity();
@@ -28,8 +26,6 @@ public partial class BulletSpawnSystem : SystemBase
             EntityManager.AddComponentObject(e, new BulletCompanionRef { MB = req.Companion });
             EntityManager.AddComponent<BulletDeadTag>(e);
             EntityManager.SetComponentEnabled<BulletDeadTag>(e, false); // disabled = alive
-
-            UnityEngine.Debug.Log($"[BulletSpawnSystem] Entity {e.Index}: vel={req.Velocity}, lifetime={req.Data.Lifetime}, companion={(req.Companion != null ? req.Companion.name : "NULL")}");
         }
 
         pending.Clear();
