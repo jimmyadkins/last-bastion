@@ -11,7 +11,7 @@ public partial class BulletSuperSystem : RootSuperSystem
     protected override void CreateSystems()
     {
         GetOrCreateAndAddManagedSystem<BulletSpawnSystem>();       // create entities from pending requests
-        GetOrCreateAndAddUnmanagedSystem<BulletMoveSystem>();      // Burst: move + lifetime
+        GetOrCreateAndAddManagedSystem<BulletMoveSystem>();       // move + lifetime
         GetOrCreateAndAddManagedSystem<BulletWallHitSystem>();     // raycast sweep, ricochet
         GetOrCreateAndAddManagedSystem<BulletSwarmerHitSystem>();  // distance check, damage
         GetOrCreateAndAddManagedSystem<BulletTransformSyncSystem>(); // ECS pos → companion transform

@@ -1,52 +1,60 @@
-using Unity.Burst;
 using Unity.Entities;
-using Unity.Mathematics;
+using Unity.Collections;
 
 /// <summary>
-/// Burst-compiled IJobEntity.
-/// • Saves current position to BulletPrevPosition (used by wall-hit sweep).
-/// • Applies gravity to velocity (AffectedByGravity bullets).
-/// • Integrates position.
-/// • Decrements lifetime; sets BulletDeadTag enabled when expired.
+/// Managed system: integrates bullet positions each fixed tick.
+/// Saves prevPos for wall-hit sweep, applies gravity, decrements lifetime,
+/// and marks expired bullets dead via SetComponentEnabled.
 ///
 /// [DisableAutoCreation] — managed by BulletSuperSystem only.
 /// </summary>
 [DisableAutoCreation]
-public partial struct BulletMoveSystem : ISystem
+public partial class BulletMoveSystem : SystemBase
 {
-    [BurstCompile]
-    public void OnUpdate(ref SystemState state)
-    {
-        float dt      = SystemAPI.Time.DeltaTime;
-        float gravity = -9.81f; // standard; match Physics.gravity.y if needed
+    private EntityQuery m_query;
 
-        state.Dependency = new MoveJob { DeltaTime = dt, GravityY = gravity }.ScheduleParallel(state.Dependency);
+    protected override void OnCreate()
+    {
+        m_query = new EntityQueryBuilder(Allocator.Temp)
+            .WithAllRW<BulletPosition, BulletPrevPosition, BulletVelocity, BulletData>()
+            .WithDisabled<BulletDeadTag>()
+            .Build(this);
     }
 
-    [BurstCompile]
-    [WithDisabled(typeof(BulletDeadTag))]
-    partial struct MoveJob : IJobEntity
+    protected override void OnUpdate()
     {
-        public float DeltaTime;
-        public float GravityY;
+        float dt      = SystemAPI.Time.DeltaTime;
+        float gravity = UnityEngine.Physics.gravity.y;
 
-        void Execute(
-            ref BulletPosition     pos,
-            ref BulletPrevPosition prevPos,
-            ref BulletVelocity     vel,
-            ref BulletData         data,
-            EnabledRefRW<BulletDeadTag> dead)
+        var entities = m_query.ToEntityArray(Allocator.Temp);
+
+        UnityEngine.Debug.Log($"[BulletMoveSystem] dt={dt:F4} entities={entities.Length}");
+
+        for (int i = 0; i < entities.Length; i++)
         {
-            prevPos.Value = pos.Value;
+            var e    = entities[i];
+            var pos  = EntityManager.GetComponentData<BulletPosition>(e);
+            var prev = EntityManager.GetComponentData<BulletPrevPosition>(e);
+            var vel  = EntityManager.GetComponentData<BulletVelocity>(e);
+            var data = EntityManager.GetComponentData<BulletData>(e);
+
+            prev.Value = pos.Value;
 
             if (data.AffectedByGravity)
-                vel.Value.y += GravityY * DeltaTime;
+                vel.Value.y += gravity * dt;
 
-            pos.Value     += vel.Value * DeltaTime;
-            data.Lifetime -= DeltaTime;
+            pos.Value     += vel.Value * dt;
+            data.Lifetime -= dt;
+
+            EntityManager.SetComponentData(e, pos);
+            EntityManager.SetComponentData(e, prev);
+            EntityManager.SetComponentData(e, vel);
+            EntityManager.SetComponentData(e, data);
 
             if (data.Lifetime <= 0f)
-                dead.ValueRW = true;
+                EntityManager.SetComponentEnabled<BulletDeadTag>(e, true);
         }
+
+        entities.Dispose();
     }
 }
