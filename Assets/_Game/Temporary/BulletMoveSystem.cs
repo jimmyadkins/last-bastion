@@ -16,7 +16,10 @@ public partial class BulletMoveSystem : SystemBase
     protected override void OnCreate()
     {
         m_query = new EntityQueryBuilder(Allocator.Temp)
-            .WithAllRW<BulletPosition, BulletPrevPosition, BulletVelocity, BulletData>()
+            .WithAllRW<BulletPosition>()
+            .WithAllRW<BulletPrevPosition>()
+            .WithAllRW<BulletVelocity>()
+            .WithAllRW<BulletData>()
             .WithDisabled<BulletDeadTag>()
             .Build(this);
     }
