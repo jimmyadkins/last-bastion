@@ -27,6 +27,9 @@ public partial class BulletTransformSyncSystem : SystemBase
         var entities  = m_query.ToEntityArray(Allocator.Temp);
         var positions = m_query.ToComponentDataArray<BulletPosition>(Allocator.Temp);
 
+        if (entities.Length > 0)
+            UnityEngine.Debug.Log($"[BulletTransformSync] Syncing {entities.Length} alive bullets");
+
         for (int i = 0; i < entities.Length; i++)
         {
             var cr = EntityManager.GetComponentObject<BulletCompanionRef>(entities[i]);
