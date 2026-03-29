@@ -24,7 +24,6 @@ public class SwarmerController : MonoBehaviour
     [SerializeField] private AudioClip deathSound;
     private AudioSource m_attackAudioSource;
 
-    private float currentHealth;
 
     public bool ShowDesiredHeading = false;
     public float separationWeight;
@@ -92,8 +91,6 @@ public class SwarmerController : MonoBehaviour
         SwarmerManager.Instance.Register(this);
         m_manager = SwarmerManager.Instance;
 
-        currentHealth = maxHealth;
-
         attackVFX = GetComponentInChildren<VisualEffect>();
         if (attackVFX != null)
         {
@@ -122,6 +119,7 @@ public class SwarmerController : MonoBehaviour
             m_em.AddComponentData(m_entity, new SwarmerTargetPos  ());
             m_em.AddComponentData(m_entity, new SwarmerDesiredVelocity ());
             m_em.AddComponentData(m_entity, new SwarmerIsAttacking ());
+            m_em.AddComponentData(m_entity, new SwarmerHealth { Current = maxHealth, Max = maxHealth });
             m_em.AddComponentObject(m_entity, new SwarmerCompanionRef { MB = this });
 
             m_entityCreated = true;
@@ -151,16 +149,7 @@ public class SwarmerController : MonoBehaviour
         }
     }
 
-    public void TakeDamage(float damage)
-    {
-        currentHealth -= damage;
-        if (currentHealth <= 0)
-        {
-            Die();
-        }
-    }
-
-    private void Die()
+    public void Die()
     {
         if (SwarmerDeathVFXPool.Instance != null)
         {

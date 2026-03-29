@@ -32,7 +32,7 @@ public partial class BulletDeathSystem : SystemBase
 
         m_swarmerQuery = GetEntityQuery(
             ComponentType.ReadOnly<SwarmerPosition>(),
-            ComponentType.ReadOnly<SwarmerCompanionRef>());
+            ComponentType.ReadWrite<SwarmerHealth>());
     }
 
     protected override void OnUpdate()
@@ -47,6 +47,7 @@ public partial class BulletDeathSystem : SystemBase
         // Snapshot swarmer state once for any AoE checks this tick.
         var swarmerEntities  = m_swarmerQuery.ToEntityArray(Allocator.Temp);
         var swarmerPositions = m_swarmerQuery.ToComponentDataArray<SwarmerPosition>(Allocator.Temp);
+        var swarmerHealths   = m_swarmerQuery.ToComponentDataArray<SwarmerHealth>(Allocator.Temp);
 
         var ecb = new EntityCommandBuffer(Allocator.Temp);
 
@@ -65,9 +66,9 @@ public partial class BulletDeathSystem : SystemBase
                 for (int si = 0; si < swarmerEntities.Length; si++)
                 {
                     if (math.lengthsq(bulletPos.Value - swarmerPositions[si].Value) > sqrRadius) continue;
-                    var sr = EntityManager.GetComponentObject<SwarmerCompanionRef>(swarmerEntities[si]);
-                    if (sr?.MB != null)
-                        sr.MB.TakeDamage(bulletData.ExplosionDamage);
+                    var health = swarmerHealths[si];
+                    health.Current -= bulletData.ExplosionDamage;
+                    EntityManager.SetComponentData(swarmerEntities[si], health);
                 }
             }
 
@@ -87,6 +88,7 @@ public partial class BulletDeathSystem : SystemBase
 
         swarmerEntities.Dispose();
         swarmerPositions.Dispose();
+        swarmerHealths.Dispose();
         entities.Dispose();
 
         ecb.Playback(EntityManager);

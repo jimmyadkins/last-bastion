@@ -21,6 +21,10 @@ public static class Defines
 
     public const float HQThreatDistance = 15f;
 
+    // Artillery won't target clusters closer than this — prevents self-blast (explosion radius = 10u)
+    // and ensures the arc trajectory has enough horizontal distance to work.
+    public const float ArtyMinRange = 15f;
+
     public const float MusicBaseVolume = .3f;
     public const float EffectBaseVolume = 1;
 }

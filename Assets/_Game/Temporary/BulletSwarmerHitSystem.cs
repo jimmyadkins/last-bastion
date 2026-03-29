@@ -41,7 +41,7 @@ public partial class BulletSwarmerHitSystem : SystemBase
         m_swarmerQuery = GetEntityQuery(
             ComponentType.ReadOnly<SwarmerPosition>(),
             ComponentType.ReadOnly<SwarmerRadius>(),
-            ComponentType.ReadOnly<SwarmerCompanionRef>());
+            ComponentType.ReadWrite<SwarmerHealth>());
     }
 
     protected override void OnUpdate()
@@ -105,11 +105,10 @@ public partial class BulletSwarmerHitSystem : SystemBase
             // Bullet may have been killed by an earlier hit this frame.
             if (EntityManager.IsComponentEnabled<BulletDeadTag>(bulletEntity)) continue;
 
-            var sr = EntityManager.GetComponentObject<SwarmerCompanionRef>(swarmerEntity);
-            if (sr?.MB == null) continue;
-
-            var data = EntityManager.GetComponentData<BulletData>(bulletEntity);
-            sr.MB.TakeDamage(data.Damage);
+            var data   = EntityManager.GetComponentData<BulletData>(bulletEntity);
+            var health = EntityManager.GetComponentData<SwarmerHealth>(swarmerEntity);
+            health.Current -= data.Damage;
+            EntityManager.SetComponentData(swarmerEntity, health);
 
             data.Penetration--;
             EntityManager.SetComponentData(bulletEntity, data);

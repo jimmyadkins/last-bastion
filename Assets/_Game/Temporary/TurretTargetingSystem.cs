@@ -166,6 +166,7 @@ public partial class TurretTargetingSystem : SystemBase
                     CellSize       = config.CellSize,
                     Gravity        = math.abs(Physics.gravity.y),
                     SwarmerMaxSpeed = config.MaxSpeed,
+                    MinRangeSq     = Defines.ArtyMinRange * Defines.ArtyMinRange,
                     AimPositions   = artyAim,
                     HasAssignment  = artyHas,
                 }.Schedule().Complete();
@@ -251,6 +252,7 @@ public partial class TurretTargetingSystem : SystemBase
         public float CellSize;
         public float Gravity;
         public float SwarmerMaxSpeed;
+        public float MinRangeSq;
 
         public NativeArray<float3> AimPositions;
         public NativeArray<bool>   HasAssignment;
@@ -277,7 +279,9 @@ public partial class TurretTargetingSystem : SystemBase
                     int2   cell       = CellKeys[ci];
                     float3 cellCenter = new float3(cell.x * CellSize + halfCell, 0f, cell.y * CellSize + halfCell);
 
-                    if (math.distancesq(artyPos, cellCenter) > rangeSq) continue;
+                    float distSqToCell = math.distancesq(artyPos, cellCenter);
+                    if (distSqToCell > rangeSq) continue;
+                    if (distSqToCell < MinRangeSq) continue;
                     if (claimedCells.Contains(cell)) continue;
 
                     // Blast score: sum counts in all cells within explosion radius.

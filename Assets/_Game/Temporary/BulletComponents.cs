@@ -17,6 +17,7 @@ public struct BulletData : IComponentData
     public float ExplosionDamage;
     public bool  AffectedByGravity; // true for ArtyBullet
     public bool  CanRicochet;       // false for arty/railgun — always explode on wall hit
+    public float MeshScale;         // uniform scale for Entities Graphics LocalToWorld
 }
 
 // ── Companion link (managed) ─────────────────────────────────────────────────

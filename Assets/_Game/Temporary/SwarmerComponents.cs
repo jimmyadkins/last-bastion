@@ -45,6 +45,9 @@ public struct SwarmerSeparation : IComponentData { public float3 Value; }
 // ─── Attack flag ─────────────────────────────────────────────────────────────
 public struct SwarmerIsAttacking : IComponentData { public bool Value; }
 
+// ── Health ────────────────────────────────────────────────────────────────
+public struct SwarmerHealth : IComponentData { public float Current; public float Max; }
+
 // ─── Companion link (managed class IComponentData → links entity back to MB) ─
 public class SwarmerCompanionRef : IComponentData
 {

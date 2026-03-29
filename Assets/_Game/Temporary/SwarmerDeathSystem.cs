@@ -18,13 +18,16 @@ public partial class SwarmerDeathSystem : SystemBase
 
     protected override void OnCreate()
     {
-        m_query = GetEntityQuery(ComponentType.ReadOnly<SwarmerCompanionRef>());
+        m_query = GetEntityQuery(
+            ComponentType.ReadOnly<SwarmerCompanionRef>(),
+            ComponentType.ReadOnly<SwarmerHealth>());
     }
 
     protected override void OnUpdate()
     {
         var ecb      = new EntityCommandBuffer(Allocator.Temp);
         var entities = m_query.ToEntityArray(Allocator.Temp);
+        var healths  = m_query.ToComponentDataArray<SwarmerHealth>(Allocator.Temp);
 
         for (int i = 0; i < entities.Length; i++)
         {
@@ -33,8 +36,17 @@ public partial class SwarmerDeathSystem : SystemBase
             if (companion == null || companion.MB == null)
             {
                 ecb.DestroyEntity(entities[i]);
+                continue;
+            }
+
+            if (healths[i].Current <= 0f)
+            {
+                companion.MB.Die(); // spawns VFX, calls Destroy(gameObject)
+                ecb.DestroyEntity(entities[i]);
             }
         }
+
+        healths.Dispose();
 
         entities.Dispose();
 

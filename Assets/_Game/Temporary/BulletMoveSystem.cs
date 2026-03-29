@@ -1,10 +1,11 @@
 using Unity.Entities;
 using Unity.Collections;
+using Unity.Transforms;
 
 /// <summary>
 /// Managed system: integrates bullet positions each fixed tick.
 /// Saves prevPos for wall-hit sweep, applies gravity, decrements lifetime,
-/// and marks expired bullets dead via SetComponentEnabled.
+/// marks expired bullets dead, and writes LocalToWorld for Entities Graphics.
 ///
 /// [DisableAutoCreation] — managed by BulletSuperSystem only.
 /// </summary>
@@ -20,6 +21,7 @@ public partial class BulletMoveSystem : SystemBase
             .WithAllRW<BulletPrevPosition>()
             .WithAllRW<BulletVelocity>()
             .WithAllRW<BulletData>()
+            .WithAllRW<LocalToWorld>()
             .WithDisabled<BulletDeadTag>()
             .Build(this);
     }
@@ -51,6 +53,7 @@ public partial class BulletMoveSystem : SystemBase
             EntityManager.SetComponentData(e, prev);
             EntityManager.SetComponentData(e, vel);
             EntityManager.SetComponentData(e, data);
+            EntityManager.SetComponentData(e, BulletSpawnSystem.BulletL2W(pos.Value, vel.Value, data.MeshScale));
 
             if (data.Lifetime <= 0f)
                 EntityManager.SetComponentEnabled<BulletDeadTag>(e, true);
