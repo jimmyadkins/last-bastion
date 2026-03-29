@@ -1,5 +1,6 @@
 using System.Collections.Generic;
-using System.Linq;
+using Unity.Entities;
+using Unity.Mathematics;
 using UnityEngine;
 
 public class TurretManager : MonoBehaviour
@@ -7,44 +8,41 @@ public class TurretManager : MonoBehaviour
     public static TurretManager Instance { get; private set; }
 
     private List<TurretController> m_reactionTurrets = new();
-    private List<TurretController> m_otherTurrets = new();
-    private List<ArtyController> m_artillery = new();
+    private List<TurretController> m_otherTurrets    = new();
+    private List<ArtyController>   m_artillery       = new();
+
+    private EntityManager m_entityManager;
 
     protected void Awake()
     {
         Instance = this;
     }
 
+    private void Start()
+    {
+        var world = World.DefaultGameObjectInjectionWorld;
+        if (world != null && world.IsCreated)
+            m_entityManager = world.EntityManager;
+    }
+
     public void Register(TurretController turret)
     {
         if (IsReactionTurret(turret))
-        {
             m_reactionTurrets.Add(turret);
-        }
         else if (turret is ArtyController arty)
-        {
             m_artillery.Add(arty);
-        }
         else
-        {
             m_otherTurrets.Add(turret);
-        }
     }
 
     public void Deregister(TurretController turret)
     {
         if (IsReactionTurret(turret))
-        {
             m_reactionTurrets.Remove(turret);
-        }
         else if (turret is ArtyController arty)
-        {
             m_artillery.Remove(arty);
-        }
         else
-        {
             m_otherTurrets.Remove(turret);
-        }
     }
 
     private bool IsReactionTurret(TurretController turret)
@@ -57,97 +55,98 @@ public class TurretManager : MonoBehaviour
 
     protected void FixedUpdate()
     {
-        HandleThreateningEnemies();
+        PushTurretRegistry();
+        ApplyECSAssignments();
 
         foreach (var turret in m_otherTurrets)
-        {
             turret.UpdateTurret();
-        }
         foreach (var turret in m_reactionTurrets)
-        {
             turret.UpdateTurret();
-        }
-
-        HandleArtillery();
         foreach (var turret in m_artillery)
-        {
             turret.UpdateTurret();
-        }
     }
 
-    private void HandleThreateningEnemies()
+    // ── ECS bridge ────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Writes current turret state to TurretTargetingSystem.Registry so the ECS
+    /// system can assign targets this Update tick (results arrive next FixedUpdate).
+    /// </summary>
+    private void PushTurretRegistry()
     {
-        Collider[] colliders = Physics.OverlapSphere(
-            GameManager.Instance.GetHQPosition(),
-            Defines.HQThreatDistance,
-            1 << Defines.SwarmerLayer);
+        int regularCount = m_otherTurrets.Count + m_reactionTurrets.Count;
+        int totalCount   = regularCount + m_artillery.Count;
 
-        List<SwarmerController> swarmers = colliders
-            .Select(collider => collider.GetComponent<SwarmerController>())
-            .Where(sc => sc != null)
-            .ToList();
+        TurretTargetingSystem.RegularCount = regularCount;
 
-        foreach (var swarmer in swarmers)
-        {
-            Vector3 swarmerPos = swarmer.transform.position;
-
-            float sqrDist = float.MaxValue;
-            TurretController best = null;
-
-            foreach (var turret in m_reactionTurrets)
-            {
-                Vector3 turretPos = turret.transform.position;
-
-                if (!turret.HasTarget && (swarmerPos - turretPos).sqrMagnitude < sqrDist)
-                {
-                    Vector3 toTarget = swarmerPos - turretPos;
-                    float dist = toTarget.magnitude;
-                    toTarget /= dist;
-
-                    if (!Physics.Raycast(turretPos, toTarget, dist, 1 << Defines.EnvironmentLayer))
-                    {
-                        sqrDist = dist * dist;
-                        best = turret;
-                    }
-                }
-            }
-
-            if (best != null)
-            {
-                best.AssignTarget(swarmer);
-            }
-        }
-    }
-
-    private void HandleArtillery()
-    {
-        if (m_artillery.Count == 0)
-        {
-            return;
-        }
-
-        SwarmerManager sm = SwarmerManager.Instance;
-        List<List<SwarmerController>> enemiesInMostPopulousCells = sm.GetMostPopulousCells();
-        if (enemiesInMostPopulousCells.Count == 0)
-        {
-            return;
-        }
+        if (TurretTargetingSystem.Registry.Length != totalCount)
+            TurretTargetingSystem.Registry = new TurretTargetingSystem.TurretEntry[totalCount];
 
         int idx = 0;
-        int itrCnt = 0;
-        foreach (var arty in m_artillery)
-        {
-            if (!arty.HasTarget)
+        foreach (var t in m_otherTurrets)
+            TurretTargetingSystem.Registry[idx++] = new TurretTargetingSystem.TurretEntry
             {
-                var cell = enemiesInMostPopulousCells[idx];
-                arty.AssignTarget(cell.Count > itrCnt ? cell[itrCnt] : cell[0]);
-                ++idx;
-                if (idx == enemiesInMostPopulousCells.Count)
-                {
-                    idx = 0;
-                    ++itrCnt;
-                }
-            }
+                Position  = (float3)t.transform.position,
+                Range     = t.detectionRange,
+                HasTarget = t.HasTarget,
+            };
+        foreach (var t in m_reactionTurrets)
+            TurretTargetingSystem.Registry[idx++] = new TurretTargetingSystem.TurretEntry
+            {
+                Position  = (float3)t.transform.position,
+                Range     = t.detectionRange,
+                HasTarget = t.HasTarget,
+            };
+        foreach (var a in m_artillery)
+            TurretTargetingSystem.Registry[idx++] = new TurretTargetingSystem.TurretEntry
+            {
+                Position        = (float3)a.transform.position,
+                Range           = a.detectionRange,
+                ExplosionRadius = a.BulletExplosionRadius,
+                BulletSpeed     = a.BulletSpeed,
+                IsArty          = true,
+                HasTarget       = a.HasTarget,
+            };
+    }
+
+    /// <summary>
+    /// Reads TurretTargetingSystem output written last ECS tick and applies target
+    /// assignments to turrets that still need one.
+    /// </summary>
+    private void ApplyECSAssignments()
+    {
+        var regularAssignments = TurretTargetingSystem.RegularAssignments;
+        if (regularAssignments.Length == 0) return;
+
+        int idx = 0;
+        for (int i = 0; i < m_otherTurrets.Count && idx < regularAssignments.Length; i++, idx++)
+        {
+            Entity e = regularAssignments[idx];
+            if (e == Entity.Null || m_otherTurrets[i].HasTarget) continue;
+            var sc = TryGetSwarmerController(e);
+            if (sc != null) m_otherTurrets[i].AssignTarget(sc);
         }
+        for (int i = 0; i < m_reactionTurrets.Count && idx < regularAssignments.Length; i++, idx++)
+        {
+            Entity e = regularAssignments[idx];
+            if (e == Entity.Null || m_reactionTurrets[i].HasTarget) continue;
+            var sc = TryGetSwarmerController(e);
+            if (sc != null) m_reactionTurrets[i].AssignTarget(sc);
+        }
+
+        var artyHas = TurretTargetingSystem.ArtyHasAssignment;
+        var artyPos = TurretTargetingSystem.ArtyAimPositions;
+        for (int i = 0; i < m_artillery.Count && i < artyHas.Length; i++)
+        {
+            if (artyHas[i] && !m_artillery[i].HasTarget)
+                m_artillery[i].AssignTarget(artyPos[i]);
+        }
+    }
+
+    private SwarmerController TryGetSwarmerController(Entity e)
+    {
+        if (!m_entityManager.Exists(e)) return null;
+        var cr = m_entityManager.GetComponentObject<SwarmerCompanionRef>(e);
+        return cr?.MB;
     }
 }

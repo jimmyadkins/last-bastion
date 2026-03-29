@@ -1,4 +1,3 @@
-using System;
 using UnityEngine;
 using UnityEngine.VFX;
 
@@ -20,6 +19,9 @@ public class TurretController : MonoBehaviour
     public GameObject bulletPrefab;
     protected float bulletSpeed;
     protected Bullet m_bulletPrefabComp; // cached component used by pool
+
+    public float BulletSpeed          => bulletSpeed;
+    public float BulletExplosionRadius => m_bulletPrefabComp != null ? m_bulletPrefabComp.ExplosionRadius : 0f;
     public VisualEffect muzzleFlashVFX;
     public AudioSource FiringAudioSource;
 
@@ -116,124 +118,10 @@ public class TurretController : MonoBehaviour
         return false;
     }
 
-    private static readonly int[] signs = { -1, 1 };
     protected virtual void FindTarget()
     {
-        Vector2Int turretCoord = SwarmerManager.Instance.GetCoord(transform.position);
-        float gridCellSize = SwarmerManager.Instance.CellSize;
-        int maxCellRange = Mathf.CeilToInt(detectionRange / gridCellSize);
-
-        // exits early for searching in a certain direction
-        //                     NW     NE    SW    SE    WS   WN     ES    EW
-        bool[] searchSpace = { true, true, true, true, true, true, true, true };
-
-        // dummy reference passed in
-        TryGetGridTarget(turretCoord.x, turretCoord.y, ref searchSpace[0]);
-
-        for (int d = 1; d <= maxCellRange; ++d)
-        {
-            for (int i = 0; i < searchSpace.Length; ++i)
-            {
-                searchSpace[i] = true;
-            }
-
-            for (int o = 0; o <= d && Array.Exists(searchSpace, v => v); ++o)
-            {
-                foreach (int sign in signs)
-                {
-                    // Check vertical samples
-                    if (searchSpace[(sign+1)/2 + 0] && TryGetGridTarget(
-                            turretCoord.x + (o * sign),
-                            turretCoord.y + d,
-                            ref searchSpace[(sign+1)/2])
-                        ||
-                        searchSpace[(sign+1)/2 + 2] && TryGetGridTarget(
-                            turretCoord.x + (o * sign),
-                            turretCoord.y - d,
-                            ref searchSpace[(sign+1)/2 + 2]))
-                    {
-                        return;
-                    }
-
-                    // If we are checking the farthest offset (o value) then the corners have already
-                    // been taken care of by the vertical samples. No need to check the horizontal 
-                    // ones since they are duplicates
-                    if (o == d) continue;
-
-                    // Check horizontal samples
-                    if (searchSpace[(sign+1)/2 + 4] && TryGetGridTarget(
-                            turretCoord.x - d,
-                            turretCoord.y + (o * sign),
-                            ref searchSpace[(sign+1)/2 + 4])
-                        ||
-                        searchSpace[(sign+1)/2 + 6] && TryGetGridTarget(
-                            turretCoord.x + d,
-                            turretCoord.y + (o * sign),
-                            ref searchSpace[(sign+1)/2 + 6]))
-                    {
-                        return;
-                    }
-                }
-            }
-        }
-    }
-
-    private bool WithinRangeBounds(Vector2Int xBounds, Vector2Int yBounds, Vector2Int coords)
-    {
-        return coords.x >= xBounds.x && coords.x <= xBounds.y &&
-               coords.y >= yBounds.x && coords.y <= yBounds.y;
-    }
-
-    private int GetMaxDistFromTurretBound(Vector2Int xBounds, Vector2Int yBounds, Vector2Int searchOrigin)
-    {
-        int maxX = Mathf.Max(Mathf.Abs(searchOrigin.x - xBounds.x), Mathf.Abs(searchOrigin.x - xBounds.y));
-        int maxY = Mathf.Max(Mathf.Abs(searchOrigin.y - yBounds.x), Mathf.Abs(searchOrigin.y - yBounds.y));
-        return Mathf.Max(maxX, maxY);
-    }
-
-    private bool TryGetGridTarget(int x, int y, ref bool continueSearch)
-    {
-        float cellSize = SwarmerManager.Instance.CellSize;
-
-        Vector2Int coord = new Vector2Int(x, y);
-        Vector3 cellPosition = SwarmerManager.Instance.GetCellPosition(coord);
-
-        // If the closests extents of the cell are beyond our reach just return false
-        // This also means that any other cell in this direction at this distance will be further 
-        // away, so we can stop searching in this direction
-        if (Vector3.Distance(cellPosition, transform.position) - cellSize > detectionRange)
-        {
-            continueSearch = false;
-            return false;
-        }
-
-        if (CheckCellForValidTarget(x, y))
-        {
-            return true;
-        }
-
-        return false;
-    }
-
-    protected bool CheckCellForValidTarget(Vector2Int coord)
-    {
-        return CheckCellForValidTarget(coord.x, coord.y);
-    }
-
-    private bool CheckCellForValidTarget(int x, int y)
-    {
-        float sqrRange = MathFunctions.Square(detectionRange);
-        Vector2Int coord = new(x, y);
-
-        foreach (var target in SwarmerManager.Instance.GetEnemiesInCell(coord))
-        {
-            if (!target.IsMarked && IsPositionTargetable(target.transform.position))
-            {
-                m_target.UpdateTarget(target);
-                return true;
-            }
-        }
-        return false;
+        // Target acquisition moved to TurretTargetingSystem (ECS).
+        // TurretManager.ApplyECSAssignments() calls AssignTarget() each fixed tick.
     }
 
     protected virtual bool RotateToFaceTarget()

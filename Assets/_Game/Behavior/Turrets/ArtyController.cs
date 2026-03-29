@@ -2,33 +2,58 @@ using UnityEngine;
 
 public class ArtyController : TurretController
 {
+    // ── Position-based targeting (set by TurretTargetingSystem) ──────────────
+    private bool    m_hasAimPosition;
+    private Vector3 m_aimPosition;
+
+    /// <summary>
+    /// Called by TurretManager.ApplyECSAssignments() with a pre-predicted world
+    /// position: cluster center + (cell heading × maxSpeed × flight time).
+    /// Supersedes the swarmer-tracking path for this shot.
+    /// </summary>
+    public void AssignTarget(Vector3 worldPos)
+    {
+        m_aimPosition    = worldPos;
+        m_hasAimPosition = true;
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+
     protected override bool RotateToFaceTarget()
     {
-        Vector3 targetPosition = m_target.lastPosition;
-        Vector3 targetVelocity = m_target.target != null ? m_target.target.LastKnownVelocity : Vector3.zero;
+        Vector3 targetPosition;
 
-        float g = Mathf.Abs(Physics.gravity.y);
-        float timeToImpact = MathFunctions.Sqrt2 * bulletSpeed / g;
-
-        Vector3 predictedPosition = targetPosition + targetVelocity * timeToImpact;
+        if (m_hasAimPosition)
+        {
+            // ECS already predicted the lead position — aim there directly.
+            targetPosition = m_aimPosition;
+        }
+        else
+        {
+            // Fallback: swarmer-tracking path with internal velocity prediction.
+            Vector3 targetVelocity = m_target.target != null ? m_target.target.LastKnownVelocity : Vector3.zero;
+            float g             = Mathf.Abs(Physics.gravity.y);
+            float timeToImpact  = MathFunctions.Sqrt2 * bulletSpeed / g;
+            targetPosition      = m_target.lastPosition + targetVelocity * timeToImpact;
+        }
 
         // Horizontal rotation (Y-axis)
-        Vector3 horizontalDirection = new Vector3(predictedPosition.x - transform.position.x, 0f, predictedPosition.z - transform.position.z).normalized;
+        Vector3 horizontalDirection = new Vector3(targetPosition.x - transform.position.x, 0f, targetPosition.z - transform.position.z).normalized;
         Quaternion horizontalLookRotation = Quaternion.LookRotation(horizontalDirection);
         turretBase.rotation = Quaternion.RotateTowards(turretBase.rotation, horizontalLookRotation, Time.fixedDeltaTime * rotationSpeed);
 
         float angleFromTarget = Quaternion.Angle(turretBase.rotation, horizontalLookRotation);
 
-        Vector2 toAimPoint = predictedPosition.xz() - transform.position.xz();
+        Vector2 toAimPoint = targetPosition.xz() - transform.position.xz();
         float distanceToAimPoint = toAimPoint.magnitude;
         toAimPoint /= distanceToAimPoint;
 
-        float horizontalVelocityProportion = distanceToAimPoint / (bulletSpeed * timeToImpact);
+        float g2 = Mathf.Abs(Physics.gravity.y);
+        float timeToImpact2 = MathFunctions.Sqrt2 * bulletSpeed / g2;
+        float horizontalVelocityProportion = distanceToAimPoint / (bulletSpeed * timeToImpact2);
         if (horizontalVelocityProportion > 1)
         {
-            // This happens when the bullet lacks the rangle to get there in time
-            // It is impossible to find an elevation where it will hit
-            // Probably need to pick a different target at this point
+            // Target out of range for this arc — can't find a valid elevation.
             return false;
         }
 
@@ -42,14 +67,13 @@ public class ArtyController : TurretController
         return Mathf.Max(angleFromTarget, verticalAngleFromTarget) <= Defines.TurretAimTolerance;
     }
 
-    // targets will be found by the turret manager -> just don't do anything
-    protected override void FindTarget()
-    {
-        return;
-    }
+    // targets will be found by TurretTargetingSystem via TurretManager
+    protected override void FindTarget() { }
 
     protected override bool IsTargetValid()
     {
+        if (m_hasAimPosition) return true;
+
         if (m_target.IsValid && m_target.IsAlive())
         {
             m_target.UpdateTarget();
@@ -76,14 +100,14 @@ public class ArtyController : TurretController
             FindTarget();
         }
 
-        if (m_target.IsValid)
+        if (m_target.IsValid || m_hasAimPosition)
         {
             bool bIsAimed = RotateToFaceTarget();
             if (fireCooldown <= 0f && bIsAimed)
             {
                 Fire();
-                // get a new target after we fire
                 m_target.Invalidate();
+                m_hasAimPosition = false; // clear after firing; get a new assignment next cycle
                 fireCooldown = 1f / fireRate;
             }
         }
