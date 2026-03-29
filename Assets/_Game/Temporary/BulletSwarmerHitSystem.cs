@@ -1,25 +1,43 @@
+using Latios.Psyshock;
+using Latios.Transforms;
+using Unity.Burst;
 using Unity.Collections;
 using Unity.Entities;
+using Unity.Jobs;
 using Unity.Mathematics;
 
 /// <summary>
-/// Main-thread managed system.
-/// For each alive bullet, checks distance against all alive swarmer positions.
-/// Applies direct damage and decrements penetration; marks bullet dead when exhausted.
-/// AoE splash is handled by BulletDeathSystem so it fires on any death cause
-/// (swarmer hit, ground hit, lifetime expiry).
+/// Phase C: replaces the O(n·m) scan with Psyshock FindPairs broadphase.
 ///
-/// Phase C will replace this O(n·m) scan with Psyshock FindPairs.
+/// Per bullet: a CapsuleCollider from BulletPrevPosition to BulletPosition is
+/// used so fast bullets (railgun 500 u/s) can't tunnel through swarmers between
+/// ticks. Swarmers use their existing SwarmerRadius sphere.
+///
+/// Flow per tick:
+///   1. Build ColliderBody arrays (Burst, parallel).
+///   2. Build two CollisionLayers (Burst, parallel).
+///   3. FindPairs(bulletLayer, swarmerLayer) → NativeList of (bulletIdx, swarmerIdx).
+///   4. Main thread: apply damage, decrement penetration, mark dead.
+///
+/// AoE splash is still handled by BulletDeathSystem on bullet death.
 ///
 /// [DisableAutoCreation] — managed by BulletSuperSystem only.
 /// </summary>
 [DisableAutoCreation]
 public partial class BulletSwarmerHitSystem : SystemBase
 {
+    private EntityQuery m_bulletQuery;
     private EntityQuery m_swarmerQuery;
+
+    private struct HitPair { public int BulletIndex; public int SwarmerIndex; }
 
     protected override void OnCreate()
     {
+        m_bulletQuery = new EntityQueryBuilder(Allocator.Temp)
+            .WithAll<BulletPosition, BulletPrevPosition, BulletData>()
+            .WithDisabled<BulletDeadTag>()
+            .Build(this);
+
         m_swarmerQuery = GetEntityQuery(
             ComponentType.ReadOnly<SwarmerPosition>(),
             ComponentType.ReadOnly<SwarmerRadius>(),
@@ -28,49 +46,149 @@ public partial class BulletSwarmerHitSystem : SystemBase
 
     protected override void OnUpdate()
     {
-        var swarmerEntities  = m_swarmerQuery.ToEntityArray(Allocator.Temp);
-        var swarmerPositions = m_swarmerQuery.ToComponentDataArray<SwarmerPosition>(Allocator.Temp);
-        var swarmerRadii     = m_swarmerQuery.ToComponentDataArray<SwarmerRadius>(Allocator.Temp);
+        int bulletCount  = m_bulletQuery.CalculateEntityCount();
+        int swarmerCount = m_swarmerQuery.CalculateEntityCount();
+        if (bulletCount == 0 || swarmerCount == 0) return;
 
-        foreach (var (pos, prevPos, data, dead) in
-            SystemAPI.Query<
-                RefRO<BulletPosition>,
-                RefRO<BulletPrevPosition>,
-                RefRW<BulletData>,
-                EnabledRefRW<BulletDeadTag>>()
-            .WithDisabled<BulletDeadTag>())
+        // ── Snapshot component data ──────────────────────────────────────────
+        var bulletPositions  = m_bulletQuery.ToComponentDataArray<BulletPosition>(Allocator.TempJob);
+        var bulletPrevPos    = m_bulletQuery.ToComponentDataArray<BulletPrevPosition>(Allocator.TempJob);
+        var bulletDatas      = m_bulletQuery.ToComponentDataArray<BulletData>(Allocator.TempJob);
+        var bulletEntities   = m_bulletQuery.ToEntityArray(Allocator.TempJob);
+        var swarmerPositions = m_swarmerQuery.ToComponentDataArray<SwarmerPosition>(Allocator.TempJob);
+        var swarmerRadii     = m_swarmerQuery.ToComponentDataArray<SwarmerRadius>(Allocator.TempJob);
+        var swarmerEntities  = m_swarmerQuery.ToEntityArray(Allocator.TempJob);
+
+        // ── Build ColliderBody arrays ────────────────────────────────────────
+        var bulletBodies  = new NativeArray<ColliderBody>(bulletCount,  Allocator.TempJob);
+        var swarmerBodies = new NativeArray<ColliderBody>(swarmerCount, Allocator.TempJob);
+
+        new BuildBulletBodiesJob
         {
-            float3 a = prevPos.ValueRO.Value; // start of this frame's sweep
-            float3 b = pos.ValueRO.Value;     // end of this frame's sweep
-            float3 ab = b - a;
-            float abLenSq = math.lengthsq(ab);
+            Positions     = bulletPositions,
+            PrevPositions = bulletPrevPos,
+            Datas         = bulletDatas,
+            Entities      = bulletEntities,
+            Bodies        = bulletBodies,
+        }.Schedule(bulletCount, 64).Complete();
 
-            for (int si = 0; si < swarmerEntities.Length; si++)
-            {
-                // Closest point on segment (a→b) to swarmer center.
-                float3 ap = swarmerPositions[si].Value - a;
-                float t = abLenSq > 0f ? math.clamp(math.dot(ap, ab) / abLenSq, 0f, 1f) : 0f;
-                float3 closest = a + t * ab;
-                float dist = math.distance(closest, swarmerPositions[si].Value);
+        new BuildSwarmerBodiesJob
+        {
+            Positions = swarmerPositions,
+            Radii     = swarmerRadii,
+            Entities  = swarmerEntities,
+            Bodies    = swarmerBodies,
+        }.Schedule(swarmerCount, 64).Complete();
 
-                if (dist > data.ValueRO.ColliderRadius + swarmerRadii[si].Value) continue;
+        // ── Build Psyshock CollisionLayers ───────────────────────────────────
+        Physics.BuildCollisionLayer(bulletBodies)
+            .ScheduleParallel(out CollisionLayer bulletLayer, Allocator.TempJob, default)
+            .Complete();
 
-                var swarmerRef = EntityManager.GetComponentObject<SwarmerCompanionRef>(swarmerEntities[si]);
-                if (swarmerRef?.MB == null) continue;
+        Physics.BuildCollisionLayer(swarmerBodies)
+            .ScheduleParallel(out CollisionLayer swarmerLayer, Allocator.TempJob, default)
+            .Complete();
 
-                swarmerRef.MB.TakeDamage(data.ValueRO.Damage);
+        // ── FindPairs → collect hits ─────────────────────────────────────────
+        var hits = new NativeList<HitPair>(64, Allocator.TempJob);
 
-                data.ValueRW.Penetration--;
-                if (data.ValueRO.Penetration <= 0)
-                {
-                    dead.ValueRW = true;
-                    break;
-                }
-            }
+        Physics.FindPairs(in bulletLayer, in swarmerLayer, new HitCollector { Hits = hits })
+            .ScheduleSingle(default)
+            .Complete();
+
+        // ── Apply damage on main thread ──────────────────────────────────────
+        for (int i = 0; i < hits.Length; i++)
+        {
+            Entity bulletEntity  = bulletEntities[hits[i].BulletIndex];
+            Entity swarmerEntity = swarmerEntities[hits[i].SwarmerIndex];
+
+            // Bullet may have been killed by an earlier hit this frame.
+            if (EntityManager.IsComponentEnabled<BulletDeadTag>(bulletEntity)) continue;
+
+            var sr = EntityManager.GetComponentObject<SwarmerCompanionRef>(swarmerEntity);
+            if (sr?.MB == null) continue;
+
+            var data = EntityManager.GetComponentData<BulletData>(bulletEntity);
+            sr.MB.TakeDamage(data.Damage);
+
+            data.Penetration--;
+            EntityManager.SetComponentData(bulletEntity, data);
+            if (data.Penetration <= 0)
+                EntityManager.SetComponentEnabled<BulletDeadTag>(bulletEntity, true);
         }
 
-        swarmerEntities.Dispose();
+        // ── Cleanup ──────────────────────────────────────────────────────────
+        hits.Dispose();
+        bulletLayer.Dispose();
+        swarmerLayer.Dispose();
+        bulletBodies.Dispose();
+        swarmerBodies.Dispose();
+        bulletPositions.Dispose();
+        bulletPrevPos.Dispose();
+        bulletDatas.Dispose();
+        bulletEntities.Dispose();
         swarmerPositions.Dispose();
         swarmerRadii.Dispose();
+        swarmerEntities.Dispose();
+    }
+
+    // ── Jobs ──────────────────────────────────────────────────────────────────
+
+    [BurstCompile]
+    private struct BuildBulletBodiesJob : IJobParallelFor
+    {
+        [ReadOnly] public NativeArray<BulletPosition>     Positions;
+        [ReadOnly] public NativeArray<BulletPrevPosition> PrevPositions;
+        [ReadOnly] public NativeArray<BulletData>         Datas;
+        [ReadOnly] public NativeArray<Entity>             Entities;
+        public            NativeArray<ColliderBody>       Bodies;
+
+        public void Execute(int i)
+        {
+            float3 prev = PrevPositions[i].Value;
+            float3 cur  = Positions[i].Value;
+
+            // Capsule from prevPos to curPos sweeps the full path this tick.
+            Bodies[i] = new ColliderBody
+            {
+                collider  = new CapsuleCollider(float3.zero, cur - prev, Datas[i].ColliderRadius),
+                transform = new TransformQvvs(prev, quaternion.identity),
+                entity    = Entities[i],
+            };
+        }
+    }
+
+    [BurstCompile]
+    private struct BuildSwarmerBodiesJob : IJobParallelFor
+    {
+        [ReadOnly] public NativeArray<SwarmerPosition> Positions;
+        [ReadOnly] public NativeArray<SwarmerRadius>   Radii;
+        [ReadOnly] public NativeArray<Entity>          Entities;
+        public            NativeArray<ColliderBody>    Bodies;
+
+        public void Execute(int i)
+        {
+            Bodies[i] = new ColliderBody
+            {
+                collider  = new SphereCollider(float3.zero, Radii[i].Value),
+                transform = new TransformQvvs(Positions[i].Value, quaternion.identity),
+                entity    = Entities[i],
+            };
+        }
+    }
+
+    [BurstCompile]
+    private struct HitCollector : IFindPairsProcessor
+    {
+        public NativeList<HitPair> Hits;
+
+        public void Execute(in FindPairsResult result)
+        {
+            Hits.Add(new HitPair
+            {
+                BulletIndex  = result.sourceIndexA,
+                SwarmerIndex = result.sourceIndexB,
+            });
+        }
     }
 }
